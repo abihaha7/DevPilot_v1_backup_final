@@ -22,12 +22,118 @@ export const dashboardData = {
     { id: "learn", label: "Continue Learning" },
     { id: "chat", label: "Open Chat" },
     { id: "commit", label: "Generate Commit" },
-    { id: "todo", label: "TODO Tracker" }
+    { id: "todo", label: "TODO Tracker" },
   ],
 
   recentAchievements: [
     { title: "Code Reviewer", icon: "Star", color: "text-yellow-400" },
     { title: "Bug Hunter", icon: "Target", color: "text-red-400" },
-    { title: "Fast Learner", icon: "Zap", color: "text-blue-400" }
+    { title: "Fast Learner", icon: "Zap", color: "text-blue-400" },
+  ],
+
+  // 🔥 Practice Problems / Quizzes
+  practiceProblems: [
+    {
+      id: "quiz-html-easy",
+      questions: [
+        {
+          id: 1,
+          question: "Which tag defines a hyperlink?",
+          options: ["<link>", "<a>", "<href>", "<hyper>"],
+          answer: 1,
+        },
+        {
+          id: 2,
+          question: "Which tag creates a line break?",
+          options: ["<break>", "<lb>", "<br>", "<newline>"],
+          answer: 2,
+        },
+      ],
+    },
+    {
+      id: "quiz-html-medium",
+      questions: [
+        {
+          id: 1,
+          question: "Which attribute specifies an image source?",
+          options: ["src", "href", "alt", "link"],
+          answer: 0,
+        },
+        {
+          id: 2,
+          question: "Which tag is used for creating a table row?",
+          options: ["<td>", "<tr>", "<th>", "<row>"],
+          answer: 1,
+        },
+      ],
+    },
+    {
+      id: "quiz-css-easy",
+      questions: [
+        {
+          id: 1,
+          question: "Which property controls text size?",
+          options: ["font-style", "text-size", "font-size", "size"],
+          answer: 2,
+        },
+        {
+          id: 2,
+          question: "Which property sets background color?",
+          options: ["color", "background-color", "bg", "fill"],
+          answer: 1,
+        },
+      ],
+    },
+    {
+      id: "quiz-css-hard",
+      questions: [
+        {
+          id: 1,
+          question: "Which CSS layout module provides flexible box layouts?",
+          options: ["Grid", "Flexbox", "Float", "Inline-block"],
+          answer: 1,
+        },
+        {
+          id: 2,
+          question: "Which property defines the stacking order of elements?",
+          options: ["z-index", "order", "stack", "layer"],
+          answer: 0,
+        },
+      ],
+    },
+    {
+      id: "quiz-js-easy",
+      questions: [
+        {
+          id: 1,
+          question: "Which keyword declares a constant?",
+          options: ["let", "var", "const", "static"],
+          answer: 2,
+        },
+        {
+          id: 2,
+          question: "Which method converts JSON string to object?",
+          options: ["JSON.parse()", "JSON.stringify()", "Object.fromJSON()", "JSON.toObject()"],
+          answer: 0,
+        },
+      ],
+    },
+    {
+      id: "quiz-js-medium",
+      questions: [
+        {
+          id: 1,
+          question: "Which operator checks both value and type?",
+          options: ["==", "===", "!=", "!=="],
+          answer: 1,
+        },
+        {
+          id: 2,
+          question: "Which method adds an element to the end of an array?",
+          options: ["push()", "pop()", "shift()", "unshift()"],
+          answer: 0,
+        },
+      ],
+    },
   ],
 };

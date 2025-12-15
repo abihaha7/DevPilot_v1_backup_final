@@ -12,12 +12,6 @@ export function activate(context: vscode.ExtensionContext) {
   });
   context.subscriptions.push(helloWorld);
 
-  // Open Dashboard command
-  const openDashboard = vscode.commands.registerCommand('devpilot.openDashboard', () => {
-    vscode.window.showInformationMessage('🚀 DevPilot Dashboard opened (placeholder)');
-  });
-  context.subscriptions.push(openDashboard);
-
   // Set OpenAI API Key command
   const setOpenAIKey = vscode.commands.registerCommand('devpilot.setOpenAIKey', async () => {
     const apiKey = await vscode.window.showInputBox({

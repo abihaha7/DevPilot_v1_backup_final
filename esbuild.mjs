@@ -1,88 +1,95 @@
+// esbuild.mjs
 import esbuild from "esbuild";
 import fs from "fs";
 import path from "path";
 import postcss from "postcss";
-import tailwindcss from "@tailwindcss/postcss";
 import autoprefixer from "autoprefixer";
+import tailwindPostcss from "@tailwindcss/postcss";
+import { glob } from "glob";   // ⬅ ADD THIS
 
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
 
-// Node built‑ins that should NEVER be bundled in browser code
 const nodeBuiltins = [
-  "fs",
-  "path",
-  "child_process",
-  "node:events",
-  "node:path",
-  "node:buffer",
-  "node:fs",
-  "os",
-  "crypto"
+  "fs", "path", "child_process", "node:events",
+  "node:path", "node:buffer", "node:fs", "os", "crypto",
 ];
 
-// Paths
+// ------------------------------
+// PATHS
+// ------------------------------
 const extEntry = path.resolve("src/extension.ts");
 const extOut = path.resolve("out/extension.js");
 
 const dashEntry = path.resolve("src/components/figma-ui/dashboard/FigmaDashboard.tsx");
 const dashOutJS = path.resolve("out/components/figma-ui/dashboard/FigmaDashboard.js");
 
-// CSS files
+const rightDashboardEntry = path.resolve("src/components/figma-ui/dashboard/RightDashboard.tsx");
+const rightDashboardOutJS = path.resolve("out/components/figma-ui/dashboard/RightDashboard.js");
+
+const editorOverlayEntry = path.resolve("src/components/figma-ui/dashboard/EditorOverlay.tsx");
+const editorOverlayOutJS = path.resolve("out/components/figma-ui/dashboard/EditorOverlay.js");
+
 const indexCssInput = path.resolve("src/components/figma-ui/index.css");
 const globalsCssInput = path.resolve("src/components/figma-ui/styles/globals.css");
 
 const outCssDir = path.resolve("out/components/figma-ui");
 const globalsCssOutDir = path.join(outCssDir, "styles");
 
-// Cleanup old CSS
+// ------------------------------
+// CLEAN OLD CSS
+// ------------------------------
 function cleanOldCSS() {
   const oldCssFiles = [
-    path.resolve("out/FigmaDashboard.css"),
     path.join(outCssDir, "FigmaDashboard.css"),
+    path.join(outCssDir, "index.css"),
+    path.join(globalsCssOutDir, "globals.css"),
   ];
 
   oldCssFiles.forEach((file) => {
-    if (fs.existsSync(file)) {
-      fs.unlinkSync(file);
-      console.log("[cleanup] Removed:", file);
-    }
+    if (fs.existsSync(file)) {fs.unlinkSync(file);}
   });
 }
 
-// Logger plugin
+// ------------------------------
+// LOGGER PLUGIN
+// ------------------------------
 const logPlugin = {
   name: "logger",
   setup(build) {
-    build.onStart(() =>
-      console.log(`[esbuild] Building ${build.initialOptions.outfile || "bundle"}...`)
-    );
+    build.onStart(() => console.log(`[esbuild] Building ${build.initialOptions.outfile}...`));
     build.onEnd(() => console.log("[esbuild] Done."));
   },
 };
 
-// CSS builder
+// ------------------------------
+// POSTCSS BUILD
+// ------------------------------
 async function buildCSS() {
-  const cssFiles = [
+  const files = [
     { input: indexCssInput, output: path.join(outCssDir, "index.css") },
     { input: globalsCssInput, output: path.join(globalsCssOutDir, "globals.css") },
   ];
 
-  for (const file of cssFiles) {
-    const css = fs.readFileSync(file.input, "utf8");
-    const result = await postcss([tailwindcss(), autoprefixer()]).process(css, {
-      from: file.input,
-      to: file.output,
+  for (const f of files) {
+    if (!fs.existsSync(f.input)) {continue;}
+
+    const css = fs.readFileSync(f.input, "utf8");
+    const result = await postcss([tailwindPostcss, autoprefixer]).process(css, {
+      from: f.input,
+      to: f.output,
       map: !production ? { inline: false } : false,
     });
 
-    fs.mkdirSync(path.dirname(file.output), { recursive: true });
-    fs.writeFileSync(file.output, result.css, "utf8");
-    console.log("[postcss] Built:", file.output);
+    fs.mkdirSync(path.dirname(f.output), { recursive: true });
+    fs.writeFileSync(f.output, result.css, "utf8");
+    console.log(`[postcss] Built: ${f.output}`);
   }
 }
 
-// Builds extension (node)
+// ------------------------------
+// EXTENSION BUNDLE
+// ------------------------------
 async function buildExtension() {
   await esbuild.build({
     entryPoints: [extEntry],
@@ -93,89 +100,91 @@ async function buildExtension() {
     sourcemap: !production,
     minify: production,
     external: ["vscode", ...nodeBuiltins],
+    format: "cjs",
     plugins: [logPlugin],
   });
 }
 
-// Builds dashboard (browser)
+// ------------------------------
+// DASHBOARD BUNDLES
+// ------------------------------
 async function buildDashboard() {
   cleanOldCSS();
   await buildCSS();
 
-  await esbuild.build({
-    entryPoints: [dashEntry],
-    outfile: dashOutJS,
-    bundle: true,
-    platform: "browser",
-    format: "iife",
-    globalName: "DevPilotApp",
-    target: "es2020",
-    jsx: "automatic",
-    jsxImportSource: "react",
-    sourcemap: !production,
-    minify: production,
-    loader: {
-      ".ts": "ts",
-      ".tsx": "tsx",
-      ".js": "js",
-      ".css": "text",
-    },
-    external: [...nodeBuiltins],  // <-- FIXED: browser bundle must ignore node deps
-    plugins: [logPlugin],
-  });
+  const bundles = [
+    { entry: dashEntry, out: dashOutJS, name: "DevPilotApp" },
+    { entry: rightDashboardEntry, out: rightDashboardOutJS, name: "DevPilotRightDashboard" },
+    { entry: editorOverlayEntry, out: editorOverlayOutJS, name: "DevPilotEditorOverlay" },
+  ];
 
-  console.log("[esbuild] Dashboard built:", dashOutJS);
+  for (const b of bundles) {
+    if (!fs.existsSync(b.entry)) {continue;}
+    fs.mkdirSync(path.dirname(b.out), { recursive: true });
+    const buildResult = await esbuild.build({
+      entryPoints: [b.entry],
+      outfile: b.out,
+      bundle: true,
+      platform: "browser",
+      // For webviews, produce a single IIFE bundle so the webview can load a self-contained script
+      format: "iife",
+      globalName: b.name,
+      target: ["es2020"],
+      jsx: "automatic",
+      // Use automatic runtime and let esbuild inline react/jsx-runtime
+      jsxImportSource: "react",
+      metafile: true,
+      sourcemap: !production,
+      minify: production,
+      loader: {
+        ".ts": "ts",
+        ".tsx": "tsx",
+        ".js": "js",
+        ".jsx": "jsx",
+        ".css": "text",
+      },
+      external: [...nodeBuiltins],
+      plugins: [logPlugin],
+    });
+    console.log(`[build] Built ${b.name} ->`, b.out);
+    // Write metafile summary to help debugging bundling and external dependencies
+    if (!production && buildResult.metafile) {
+      try {
+        const mf = await esbuild.analyzeMetafile(buildResult.metafile, { verbose: true });
+        console.log(`[esbuild] Metafile analysis for ${b.name}:\n`, mf);
+      } catch (e) {}
+    }
+  }
 }
 
-// Combined build
+// ------------------------------
+// FULL BUILD
+// ------------------------------
 async function buildAll() {
   await buildExtension();
   await buildDashboard();
 }
 
-// -------------------------------
-// WATCH MODE (FIXED PROPERLY)
-// -------------------------------
-async function watchAll() {
-  console.log("[esbuild] Watch mode enabled");
-
-  const extCtx = await esbuild.context({
-    entryPoints: [extEntry],
-    outfile: extOut,
-    bundle: true,
-    platform: "node",
-    target: "node18",
-    sourcemap: true,
-    external: ["vscode", ...nodeBuiltins],
-    plugins: [logPlugin],
-  });
-
-  const dashCtx = await esbuild.context({
-    entryPoints: [dashEntry],
-    outfile: dashOutJS,
-    bundle: true,
-    platform: "browser",
-    format: "iife",
-    globalName: "DevPilotApp",
-    target: "es2020",
-    jsx: "automatic",
-    jsxImportSource: "react",
-    sourcemap: true,
-    loader: { ".css": "text" },
-    external: [...nodeBuiltins], // <-- FIXED HERE ALSO
-    plugins: [logPlugin],
-  });
-
-  await extCtx.watch();
-  await dashCtx.watch();
-}
-
+// ------------------------------
+// FIXED WATCH MODE
+// ------------------------------
 if (watch) {
-  watchAll();
+  console.log("[esbuild] Watch mode enabled.");
+  buildAll().then(() => {
+    esbuild.context({
+      entryPoints: [],
+    });
+  });
+
+  // Minimal watcher: rerun full build on every change
+  fs.watch("src", { recursive: true }, (event, file) => {
+    console.log(`[esbuild] Change detected: ${file}`);
+    buildAll().catch((e) => console.error(e));
+  });
+
 } else {
   buildAll().catch((e) => {
     console.error(e);
     process.exit(1);
   });
 }
-

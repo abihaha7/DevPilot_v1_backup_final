@@ -230,7 +230,7 @@
     list-style: none;
   }
 
-  img, svg, video, canvas, audio, iframe, embed, object {
+  img, svg, video, canvas, audio, embed, object {
     vertical-align: middle;
     display: block;
   }

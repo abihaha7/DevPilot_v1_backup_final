@@ -1,303 +1,395 @@
-// -------------------------------------------------------
-// DevPilot — EXTENSION BACKEND
-// -------------------------------------------------------
-
 import * as vscode from "vscode";
 import * as path from "path";
 import OpenAI from "openai";
+import simpleGit from "simple-git";
 
-// ⭐ ADDED — Import your sidebar
 import { SidebarViewProvider } from "./SidebarViewProvider";
+import { EditorOverlayProvider } from "./EditorOverlayProvider";
+import { RightDashboardProvider } from "./RightDashboardProvider";
+
+/* -------------------------------- Globals -------------------------------- */
 
 let openaiApiKey: string | undefined;
+let todosRunning = false;
+let rightDashboardReady = false;
 
-/* -------------------------------------------------------
-   ACTIVATE
--------------------------------------------------------- */
+// 🔒 Webview references (NOT WebviewView)
+let sidebarWebview: vscode.Webview | null = null;
+let overlayWebview: vscode.Webview | null = null;
+let rightDashboardWebview: vscode.Webview | null = null;
+
+// Right dashboard owner
+let rightDashboard: RightDashboardProvider;
+let activeFeature: string | undefined;
+
+/* -------------------------- Webview Attachers ----------------------------- */
+
+export function attachSidebar(view: vscode.WebviewView) {
+  sidebarWebview = view.webview;
+}
+
+export function attachOverlay(view: vscode.WebviewView) {
+  overlayWebview = view.webview;
+}
+
+export function attachRightDashboard(webview: vscode.Webview) {
+  rightDashboardWebview = webview;
+}
+
+/* ------------------------------ Broadcasting ------------------------------ */
+
+function broadcast(message: { type: string; payload?: any }) {
+  try {
+    sidebarWebview?.postMessage(message);
+    overlayWebview?.postMessage(message);
+    rightDashboardWebview?.postMessage(message);
+  } catch {}
+}
+
+function flushRightDashboardState() {
+  if (!rightDashboardReady || !rightDashboardWebview) {return;}
+
+  sendActiveEditor();
+  sendTheme();
+  sendActiveFeature();
+  sendTODOs();
+}
+
+/* -------------------------------- Utilities -------------------------------- */
+
+function debounce(fn: (...args: any[]) => void, delay = 400) {
+  let timer: NodeJS.Timeout;
+  return (...args: any[]) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+/* -------------------------------- Activate -------------------------------- */
+
 export function activate(context: vscode.ExtensionContext) {
-  console.log("🔥 DevPilot Activated");
+  openaiApiKey = context.globalState.get<string>("devpilot.openaiKey");
 
-  // ⭐ ADDED — Register sidebar view provider
-  const sidebarProvider = new SidebarViewProvider(context);
+  // ✅ Single owner of right panel
+  rightDashboard = new RightDashboardProvider(context);
+
+  /* ---------------- Sidebar ---------------- */
+
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       SidebarViewProvider.viewType,
-      sidebarProvider
+      new SidebarViewProvider(context)
     )
   );
 
-  // Load stored API key
-  openaiApiKey = context.globalState.get("devpilot.openaiKey");
+  /* ---------------- Overlay ---------------- */
 
-  /* ---------------------------
-     COMMAND: Hello World
-  ---------------------------- */
   context.subscriptions.push(
-    vscode.commands.registerCommand("devpilot.helloWorld", () => {
-      vscode.window.showInformationMessage("👋 Hello from DevPilot!");
-    })
+    vscode.window.registerWebviewViewProvider(
+      EditorOverlayProvider.viewType,
+      new EditorOverlayProvider(context)
+    )
   );
 
-  /* ---------------------------
-     COMMAND: Save OpenAI Key
-  ---------------------------- */
-  context.subscriptions.push(
-    vscode.commands.registerCommand("devpilot.setOpenAIKey", async () => {
-      const apiKey = await vscode.window.showInputBox({
-        placeHolder: "Enter your OpenAI API Key",
-        password: true,
-        ignoreFocusOut: true,
-      });
+  /* ---------------- Commands ---------------- */
 
-      if (!apiKey) return;
+  const register = (cmd: string, cb: (...args: any[]) => any) =>
+    context.subscriptions.push(vscode.commands.registerCommand(cmd, cb));
 
-      openaiApiKey = apiKey;
-      await context.globalState.update("devpilot.openaiKey", apiKey);
-      vscode.window.showInformationMessage("✅ OpenAI API Key saved!");
-    })
-  );
+  register("devpilot.openPanel", () => {
+    rightDashboard.show();
 
-  /* ---------------------------
-     COMMAND: Open Dashboard
-  ---------------------------- */
-  context.subscriptions.push(
-    vscode.commands.registerCommand("devpilot.openDashboard", () => {
-      const panel = vscode.window.createWebviewPanel(
-        "devpilotDashboard",
-        "DevPilot Dashboard",
-        vscode.ViewColumn.One,
-        {
-          enableScripts: true,
-          retainContextWhenHidden: true,
-          localResourceRoots: [
-            vscode.Uri.joinPath(context.extensionUri, "out"),
-            vscode.Uri.joinPath(context.extensionUri, "out", "components"),
-            vscode.Uri.joinPath(context.extensionUri, "out", "utils"),
-          ],
-        }
-      );
+    const webview = rightDashboard.webview;
+    if (webview) {
+      attachRightDashboard(webview);
+      rightDashboardReady = false;
+    }
+  });
 
-      // Inject React UI
-      panel.webview.html = getWebviewContent(panel.webview, context.extensionUri);
+  register("devpilot.setActiveFeature", (arg?: { feature?: string }) => {
+    const feature = arg?.feature;
+    if (!feature) {return;}
 
-      // -------------------------------
-      // 📩 MESSAGE HANDLER (STEP 3)
-      // -------------------------------
-      panel.webview.onDidReceiveMessage(
-        async (msg) => {
-          const { type, payload } = msg || {};
-          console.log("📩 Message from dashboard:", msg);
+    // ✅ FIX: keep runtime state
+    activeFeature = feature;
+    context.globalState.update("devpilot.activeFeature", feature);
 
-          switch (type) {
-            /* generateCommit */
-            case "generateCommit": {
-              const text = await generateCommitMessage();
-              panel.webview.postMessage({
-                type: "commitResult",
-                payload: { text },
-              });
-              break;
-            }
+    rightDashboard.show();
 
-            /* scan TODOs */
-            case "scanTODOs": {
-              const todos = await scanTODOs();
-              panel.webview.postMessage({
-                type: "todosResult",
-                payload: { todos },
-              });
-              break;
-            }
+    const webview = rightDashboard.webview;
+    if (webview) {
+      attachRightDashboard(webview);
+      rightDashboardReady = false;
+    }
 
-            /* chatMessage */
-            case "chatMessage": {
-              const userText = payload?.text ?? "";
-              const reply = await handleChat(userText);
+    broadcast({
+      type: "switchFeature",
+      payload: { feature },
+    });
+  });
 
-              panel.webview.postMessage({
-                type: "chatReply",
-                payload: { text: reply },
-              });
-              break;
-            }
+  register("devpilot.setOpenAIKey", async () => {
+    const key = await vscode.window.showInputBox({
+      placeHolder: "Enter OpenAI API Key",
+      password: true,
+      ignoreFocusOut: true,
+    });
 
-            /* helloFromDashboard */
-            case "helloFromDashboard": {
-              vscode.window.showInformationMessage(
-                "🌐 DevPilot dashboard connected."
-              );
-              break;
-            }
+    if (key) {
+      openaiApiKey = key;
+      await context.globalState.update("devpilot.openaiKey", key);
+    }
+  });
 
-            default:
-              console.warn("⚠️ Unknown message type:", type);
+  /* ---------------- Internal Webview Messages ---------------- */
+
+  register(
+    "devpilot.__internalMessage",
+    async (
+      message: any,
+      source: vscode.WebviewPanel | vscode.WebviewView | undefined
+    ) => {
+      if (!message?.type || !source) {return;}
+
+      const respond = (msg: any) => {
+        try {
+          source.webview.postMessage(msg);
+        } catch {}
+      };
+
+      switch (message.type) {
+        case "ready": {
+          // ✅ FIX: detect by webview identity
+          if (source.webview === rightDashboardWebview) {
+            rightDashboardReady = true;
+            flushRightDashboardState();
           }
-        },
-        undefined,
-        context.subscriptions
-      );
+          break;
+        }
 
-      panel.onDidDispose(() => {
-        console.log("🧹 DevPilot dashboard closed.");
-      });
+        case "switchFeature": {
+          const feature = message.payload?.feature;
+          if (!feature) {return;}
+
+          activeFeature = feature;
+          context.globalState.update("devpilot.activeFeature", feature);
+
+          rightDashboard.show();
+
+          broadcast({
+            type: "switchFeature",
+            payload: { feature },
+          });
+          break;
+        }
+
+        case "chatMessage": {
+          const text = message.payload?.text ?? "";
+          const reply = await handleChat(text);
+
+          respond({
+            type: "chatReply",
+            payload: { text: reply },
+          });
+          break;
+        }
+
+        case "generateCommit": {
+          const text = await generateCommitMessage();
+          respond({
+            type: "commitResult",
+            payload: { text },
+          });
+          break;
+        }
+      }
+    }
+  );
+
+  /* ---------------- Editor Sync ---------------- */
+
+  const syncEditorDebounced = debounce(() => {
+    sendActiveEditor();
+    setTimeout(sendTODOs, 0);
+  }, 800);
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(sendActiveEditor),
+    vscode.window.onDidChangeTextEditorSelection((e) =>
+      sendCursorSelection(e.textEditor)
+    ),
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      sendFileDiff(e.document);
+      syncEditorDebounced();
     })
   );
-}
 
-/* -------------------------------------------------------
-   WEBVIEW HTML (STEP 4)
--------------------------------------------------------- */
-function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
-  const indexCssUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(extensionUri, "out", "components", "figma-ui", "index.css")
+  /* ---------------- Theme Sync ---------------- */
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveColorTheme(() => {
+      sendTheme();
+    })
   );
 
-  const globalsCssUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(
-      extensionUri,
-      "out",
-      "components",
-      "figma-ui",
-      "styles",
-      "globals.css"
-    )
+  /* ---------------- Restore ---------------- */
+
+  const savedFeature = context.globalState.get<string>(
+    "devpilot.activeFeature"
   );
 
-  const jsUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(
-      extensionUri,
-      "out",
-      "components",
-      "figma-ui",
-      "dashboard",
-      "FigmaDashboard.js"
-    )
-  );
+  if (savedFeature) {
+    activeFeature = savedFeature;
 
-  const csp = `
-<meta http-equiv="Content-Security-Policy"
-  content="
-    default-src 'none';
-    img-src ${webview.cspSource} https: data:;
-    script-src 'unsafe-eval' 'unsafe-inline' ${webview.cspSource};
-    style-src 'unsafe-inline' ${webview.cspSource};
-    font-src ${webview.cspSource} https: data:;
-    connect-src ${webview.cspSource} https:;
-  ">
-`;
+    rightDashboard.show();
 
-  return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    ${csp}
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <link rel="stylesheet" href="${indexCssUri}">
-    <link rel="stylesheet" href="${globalsCssUri}">
-    <title>DevPilot Dashboard</title>
-  </head>
+    const webview = rightDashboard.webview;
+    if (webview) {
+      attachRightDashboard(webview);
+      rightDashboardReady = false;
+    }
 
-  <body>
-    <div id="root"></div>
-    <script src="${jsUri}"></script>
-  </body>
-</html>`;
-}
-
-/* -------------------------------------------------------
-   COMMIT GENERATION
--------------------------------------------------------- */
-async function generateCommitMessage(): Promise<string> {
-  try {
-    if (!openaiApiKey) return "⚠️ Set OpenAI API key first.";
-
-    const { simpleGit } = await import("simple-git");
-    const git = simpleGit();
-    const diff = await git.diff();
-
-    const client = new OpenAI({ apiKey: openaiApiKey });
-
-    const resp: any = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "Write concise Git commit messages." },
-        { role: "user", content: `Generate a commit message for this diff:\n${diff}` },
-      ],
-    });
-
-    return resp.choices[0].message?.content?.trim() || "❌ No commit generated.";
-  } catch (err: any) {
-    return `❌ Error: ${err.message}`;
-  }
-}
-
-/* -------------------------------------------------------
-   TODO SCANNER
--------------------------------------------------------- */
-async function scanTODOs() {
-  const todos: { file: string; line: number; text: string }[] = [];
-
-  if (!vscode.workspace.workspaceFolders?.length) {
-    vscode.window.showWarningMessage("⚠️ No workspace folder open.");
-    return todos;
-  }
-
-  const files = await vscode.workspace.findFiles(
-    "**/*.{ts,js,tsx,jsx,py,java}",
-    "**/node_modules/**"
-  );
-
-  for (const file of files) {
-    const doc = await vscode.workspace.openTextDocument(file);
-    const lines = doc.getText().split("\n");
-
-    lines.forEach((line, idx) => {
-      if (line.includes("TODO")) {
-        todos.push({
-          file: path.basename(file.fsPath),
-          line: idx + 1,
-          text: line.trim(),
-        });
-      }
+    broadcast({
+      type: "switchFeature",
+      payload: { feature: savedFeature },
     });
   }
 
-  return todos;
+  sendActiveEditor();
+  setTimeout(() => {
+    sendTODOs();
+  }, 0);
 }
 
-/* -------------------------------------------------------
-   CHATBOT
--------------------------------------------------------- */
-async function handleChat(userMsg: string): Promise<string> {
-  if (!openaiApiKey) return "⚠️ Set OpenAI API key first.";
+/* ------------------------------ Editor Sync ------------------------------ */
+
+function sendActiveEditor() {
+  const e = vscode.window.activeTextEditor;
+
+  broadcast({
+    type: "activeEditor",
+    payload: e
+      ? {
+          uri: e.document.uri.fsPath,
+          text: e.document.getText(),
+          languageId: e.document.languageId,
+          fileName: path.basename(e.document.fileName),
+        }
+      : null,
+  });
+}
+
+function sendCursorSelection(editor?: vscode.TextEditor) {
+  if (!editor) {return;}
+
+  broadcast({
+    type: "cursorSelection",
+    payload: {
+      selections: editor.selections.map((s) => ({
+        start: s.start,
+        end: s.end,
+        text: editor.document.getText(s),
+      })),
+    },
+  });
+}
+
+function sendTheme() {
+  const theme = vscode.window.activeColorTheme;
+
+  broadcast({
+    type: "theme",
+    payload: { kind: theme.kind },
+  });
+}
+
+function sendActiveFeature() {
+  if (!activeFeature) {return;}
+
+  broadcast({
+    type: "switchFeature",
+    payload: { feature: activeFeature },
+  });
+}
+
+/* ------------------------------ Git Diff ------------------------------ */
+
+async function sendFileDiff(doc?: vscode.TextDocument) {
+  if (!doc) {return;}
 
   try {
-    const client = new OpenAI({ apiKey: openaiApiKey });
-
-    const resp: any = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You are DevPilot, a coding assistant inside VS Code." },
-        { role: "user", content: userMsg },
-      ],
+    const diff = await simpleGit().diff(["--", doc.uri.fsPath]);
+    broadcast({
+      type: "fileDiff",
+      payload: { diff },
     });
+  } catch {}
+}
 
-    return resp.choices[0].message?.content?.trim() || "🤖 No response.";
-  } catch (err: any) {
-    return `❌ Chat error: ${err.message}`;
+/* ------------------------------ TODO ------------------------------ */
+
+async function sendTODOs() {
+  if (todosRunning) {return;}
+  todosRunning = true;
+
+  try {
+    const files = await vscode.workspace.findFiles(
+      "**/*.{ts,tsx,js,jsx}",
+      "**/{node_modules,out,dist}/**",
+      50
+    );
+
+    const todos: Array<{ file: string; line: number; text: string }> = [];
+
+    for (const file of files) {
+      const doc = await vscode.workspace.openTextDocument(file);
+      doc.getText().split("\n").forEach((line, i) => {
+        if (line.includes("TODO")) {
+          todos.push({
+            file: path.basename(file.fsPath),
+            line: i + 1,
+            text: line.trim(),
+          });
+        }
+      });
+    }
+
+    broadcast({
+      type: "todosResult",
+      payload: { todos },
+    });
+  } finally {
+    todosRunning = false;
   }
 }
 
-/* -------------------------------------------------------
-   DEACTIVATE
--------------------------------------------------------- */
-export function deactivate() {
-  console.log("🛑 DevPilot deactivated.");
+/* ------------------------------ OpenAI ------------------------------ */
+
+async function generateCommitMessage() {
+  if (!openaiApiKey) {return "API key not set.";}
+
+  const diff = await simpleGit().diff();
+  const client = new OpenAI({ apiKey: openaiApiKey });
+
+  const r = await client.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: diff }],
+  });
+
+  return r.choices[0]?.message?.content ?? "";
 }
 
+async function handleChat(text: string) {
+  if (!openaiApiKey) {return "API key not set.";}
 
+  const client = new OpenAI({ apiKey: openaiApiKey });
 
+  const r = await client.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: text }],
+  });
 
+  return r.choices[0]?.message?.content ?? "";
+}
 
-
-
+export function deactivate() {}

@@ -1,132 +1,178 @@
-import { Card } from '../ui/card.js';
-import { Button } from '../ui/button.js';
-import { Input } from '../ui/input.js';
-import { Badge } from '../ui/badge.js';
-import { Avatar, AvatarFallback } from '../ui/avatar.js';
-import { Bot, User, Send, RefreshCw, X, Minimize2, Maximize2 } from 'lucide-react';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { postToExtension, onExtensionMessage } from '../../../utils/vscodeBridge';
+// src/components/figma-ui/features/LearningChatbot.tsx
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Card } from "../ui/card.js";
+import { Button } from "../ui/button.js";
+import { Input } from "../ui/input.js";
+import { Bot, Send, RefreshCw, X, Minimize2, Maximize2 } from "lucide-react";
 
-interface LearningChatbotProps {
+import { postToExtension, onExtensionMessage } from "../../../utils/vscodeBridge";
+import { messageBus } from "../../figma-ui/dashboard/messageBus";
+
+export interface LearningChatbotProps {
   onClose: () => void;
-  onSend?: (text: string) => void;
-  reply?: string; // optional prop-based reply (keeps existing architecture compatible)
+  onSend: (text: string) => void;   // ✅ now required
+  reply: string;                    // ✅ now required
+  themeKind?: number;
+  autoFocus?: boolean;              // ✅ integrated
 }
 
-export function LearningChatbot({ onClose, onSend, reply }: LearningChatbotProps) {
+export function LearningChatbot({
+  onClose,
+  onSend,
+  reply,
+  themeKind,
+  autoFocus = false,
+}: LearningChatbotProps) {
   const [isMinimized, setIsMinimized] = useState(false);
-  const [inputMessage, setInputMessage] = useState('');
+  const [inputMessage, setInputMessage] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-
-  const [messages, setMessages] = useState<{ sender: 'bot' | 'user'; text: string }[]>([
-    { sender: 'bot', text: "Hi! I'm DevPilot, your coding assistant. Ask me anything about code." }
+  const [messages, setMessages] = useState<{ sender: "bot" | "user"; text: string }[]>([
+    { sender: "bot", text: "Hi! I'm DevPilot, your coding assistant. Ask me anything about code." },
   ]);
 
-  // ref to messages container for auto-scroll
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // helper to safely push a bot reply without duplicates
+  // ✅ Auto-focus support
+  useEffect(() => {
+    if (autoFocus && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [autoFocus]);
+
+  // ✅ Theme-aware colors
+  const bgColor = "var(--vscode-editor-background)";
+  const fgColor = "var(--vscode-editor-foreground)";
+
   const pushBotReply = useCallback((text: string) => {
     if (!text) return;
-    setMessages(prev => {
+    setMessages((prev) => {
       const last = prev[prev.length - 1];
-      // avoid duplicate bot replies (same text as last)
-      if (last?.sender === 'bot' && last?.text === text) {
-        return prev;
-      }
-      return [...prev, { sender: 'bot', text }];
+      if (last?.sender === "bot" && last.text === text) return prev;
+      return [...prev, { sender: "bot", text }];
     });
     setIsTyping(false);
   }, []);
 
-  // send a message to extension
   const sendMessage = () => {
     if (!inputMessage.trim()) return;
 
     const text = inputMessage.trim();
-
-    // add user message locally
-    setMessages((m) => [...m, { sender: 'user', text }]);
-    setInputMessage('');
+    setMessages((m) => [...m, { sender: "user", text }]);
+    setInputMessage("");
     setIsTyping(true);
 
-    // send to extension (Option A)
-    postToExtension('chatMessage', { text });
-
-    // notify parent if present (keeps parent-driven flow)
-    if (onSend) onSend(text);
+    postToExtension("chatMessage", { text });
+    onSend(text); // ✅ now always defined
+    messageBus.emit("chat:request", { text });
   };
 
-  // 1) Listen for direct extension responses (safer if dashboard-to-prop has timing issues)
+  // ✅ Extension replies
   useEffect(() => {
     const handler = (payload: any) => {
-      // payload is expected to be { text: string } based on your bridge contract
       const text = payload?.text ?? payload;
-      if (typeof text === 'string') {
-        pushBotReply(text);
-      }
+      if (typeof text === "string") pushBotReply(text);
     };
 
-    onExtensionMessage('chatReply', handler);
-
-    // cleanup: remove handler by filtering it out (we don't have remove API on your bridge,
-    // but your bridge stores handlers per-type. To avoid memory bleed, we attempt to remove
-    // by accessing the handlers record is not available here; if your bridge exposes a remove,
-    // replace this cleanup accordingly. For now ensure we do not add duplicates by design.)
-    return () => {
-      // No explicit remove API in existing bridge — leaving a safe no-op cleanup.
-      // If you add an "offExtensionMessage" later, call it here to remove handler.
-    };
+    onExtensionMessage("chatReply", handler);
   }, [pushBotReply]);
 
-  // 2) Support incoming reply via props (keeps FigmaDashboard -> reply prop working)
+  // ✅ Internal message bus replies
   useEffect(() => {
-    if (!reply) return;
-    pushBotReply(reply);
+    const busHandler = (payload: any) => pushBotReply(payload?.text);
+    messageBus.on("chat:response", busHandler);
+    return () => messageBus.off("chat:response", busHandler);
+  }, [pushBotReply]);
+
+  // ✅ External reply prop
+  useEffect(() => {
+    if (reply) pushBotReply(reply);
   }, [reply, pushBotReply]);
 
-  // Auto-scroll to bottom whenever messages change
+  // ✅ Auto-scroll
   useEffect(() => {
     const node = messagesRef.current;
     if (!node) return;
-    // small timeout ensures DOM updated
     requestAnimationFrame(() => {
       node.scrollTop = node.scrollHeight;
     });
   }, [messages]);
 
-  // Allow Enter to send from input (keeps your existing behavior)
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       e.preventDefault();
       sendMessage();
     }
   };
 
-  // MINIMIZED VIEW
+  const cardStyle: React.CSSProperties = {
+    backgroundColor: bgColor,
+    color: fgColor,
+    border: "1px solid var(--vscode-panel-border)",
+    borderRadius: 8,
+    boxSizing: "border-box",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+    backdropFilter: "blur(6px)",
+    width: isMinimized ? 256 : 320,
+    height: isMinimized ? undefined : 384,
+    display: "flex",
+    flexDirection: "column",
+  };
+
+  const headerStyle: React.CSSProperties = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 12,
+    borderBottom: "1px solid var(--vscode-panel-border)",
+  };
+
+  const messagesContainerStyle: React.CSSProperties = {
+    flex: 1,
+    overflowY: "auto",
+    padding: 12,
+  };
+
+  const messageStyle = (sender: "bot" | "user"): React.CSSProperties => ({
+    backgroundColor:
+      sender === "user" ? "var(--vscode-button-background)" : "var(--vscode-editorWidget-background)",
+    color: sender === "user" ? "var(--vscode-button-foreground)" : fgColor,
+    padding: 8,
+    borderRadius: 6,
+    maxWidth: "70%",
+  });
+
+  const inputStyle: React.CSSProperties = {
+    flex: 1,
+    backgroundColor: bgColor,
+    color: fgColor,
+    border: "1px solid var(--vscode-editorWidget-border)",
+    borderRadius: 4,
+    padding: 6,
+    fontSize: 13,
+  };
+
+  const footerStyle: React.CSSProperties = {
+    display: "flex",
+    padding: 12,
+    borderTop: "1px solid var(--vscode-panel-border)",
+    gap: 8,
+  };
+
+  // ✅ Minimized mode
   if (isMinimized) {
     return (
-      <Card className="w-64 bg-gray-900/95 border-gray-700 p-2 rounded-md shadow-lg backdrop-blur-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Bot className="w-4 h-4 text-purple-400" />
-            <span className="text-gray-300 text-sm">DevPilot Chat</span>
+      <Card style={cardStyle}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <Bot className="w-4 h-4" />
+            <span style={{ fontSize: 12 }}>DevPilot Chat</span>
           </div>
-          <div className="flex space-x-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsMinimized(false)}
-              className="h-6 w-6 p-0 text-gray-400 hover:text-gray-200"
-            >
+          <div style={{ display: "flex", gap: 4 }}>
+            <Button variant="ghost" size="sm" onClick={() => setIsMinimized(false)}>
               <Maximize2 className="w-3 h-3" />
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="h-6 w-6 p-0 text-gray-400 hover:text-gray-200"
-            >
+            <Button variant="ghost" size="sm" onClick={onClose}>
               <X className="w-3 h-3" />
             </Button>
           </div>
@@ -135,87 +181,57 @@ export function LearningChatbot({ onClose, onSend, reply }: LearningChatbotProps
     );
   }
 
-  // MAIN CHAT WINDOW
   return (
-    <Card className="w-80 h-96 bg-gray-900/95 border-gray-700 rounded-md shadow-lg backdrop-blur-sm flex flex-col">
-      <div className="p-3 border-b border-gray-700 flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <Bot className="w-4 h-4 text-purple-400" />
-          <h3 className="text-gray-200 text-sm font-medium">DevPilot Chat</h3>
+    <Card style={cardStyle} role="region" aria-label="DevPilot Chat Feature">
+      {/* Header */}
+      <div style={headerStyle}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <Bot className="w-4 h-4" />
+          <h3 style={{ fontSize: 13, fontWeight: 500 }}>DevPilot Chat</h3>
         </div>
-        <div className="flex space-x-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsMinimized(true)}
-            className="h-6 w-6 p-0 text-gray-400 hover:text-gray-200"
-          >
+        <div style={{ display: "flex", gap: 4 }}>
+          <Button variant="ghost" size="sm" onClick={() => setIsMinimized(true)}>
             <Minimize2 className="w-3 h-3" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            className="h-6 w-6 p-0 text-gray-400 hover:text-gray-200"
-          >
+          <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-3 h-3" />
           </Button>
         </div>
       </div>
 
-      {/* CHAT MESSAGES */}
-      <div
-        ref={messagesRef}
-        className="flex-1 overflow-y-auto p-3 space-y-2"
-        aria-live="polite"
-      >
+      {/* Messages */}
+      <div style={messagesContainerStyle} aria-live="polite" ref={messagesRef}>
         {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`p-2 rounded-md ${m.sender === 'user'
-                ? 'bg-purple-600 text-white'
-                : 'bg-gray-800 text-gray-200'}`}
-            >
-              {m.text}
-            </div>
+          <div
+            key={i}
+            style={{ display: "flex", justifyContent: m.sender === "user" ? "flex-end" : "flex-start" }}
+          >
+            <div style={messageStyle(m.sender)}>{m.text}</div>
           </div>
         ))}
-
         {isTyping && (
-          <div className="text-xs text-gray-400 italic">
+          <div style={{ fontSize: 11, color: "var(--vscode-descriptionForeground)", fontStyle: "italic" }}>
             DevPilot is typing...
           </div>
         )}
       </div>
 
-      {/* INPUT AREA */}
-      <div className="p-3 border-t border-gray-700 flex space-x-2">
+      {/* Input */}
+      <div style={footerStyle}>
         <Input
+          ref={inputRef}
           placeholder="Ask about code..."
           value={inputMessage}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputMessage(e.target.value)}
+          onChange={(e) => setInputMessage(e.target.value)}
           onKeyDown={onKeyDown}
-          className="flex-1 bg-gray-800/50 border-gray-600 text-gray-200 placeholder-gray-500 text-xs h-8"
+          style={inputStyle}
         />
-
-        <Button
-          onClick={sendMessage}
-          disabled={!inputMessage.trim()}
-          className="bg-purple-600 hover:bg-purple-700 text-white px-2 h-8"
-        >
-          {isTyping ? (
-            <RefreshCw className="w-3 h-3 animate-spin" />
-          ) : (
-            <Send className="w-3 h-3" />
-          )}
+        <Button onClick={sendMessage} disabled={!inputMessage.trim()}>
+          {isTyping ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
         </Button>
       </div>
     </Card>
   );
 }
 
-
-
-
-
-
+export default LearningChatbot;

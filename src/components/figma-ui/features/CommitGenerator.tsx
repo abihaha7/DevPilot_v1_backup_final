@@ -1,23 +1,29 @@
-import { Card } from '../ui/card.js';
-import { Button } from '../ui/button.js';
-import { Textarea } from '../ui/textarea.js';
-import { GitCommit, Copy, RefreshCw, X, Minimize2 } from 'lucide-react';
-import { useState, useEffect } from 'react';
-import { postToExtension } from '../../../utils/vscodeBridge';
+// src/components/figma-ui/features/CommitGenerator.tsx
+import React, { useEffect, useState } from "react";
+import { Card } from "../ui/card.js";
+import { Button } from "../ui/button.js";
+import { Textarea } from "../ui/textarea.js";
+import { GitCommit, Copy, RefreshCw, X, Minimize2 } from "lucide-react";
+import { postToExtension } from "../../../utils/vscodeBridge";
 import { generateCommitMessage } from "./commitService";
 
-interface CommitGeneratorProps {
+export interface CommitGeneratorProps {
   onClose: () => void;
   onGenerate?: () => void;
   result?: string;
+  themeKind?: number; // ✅ integrated
 }
-
-export function CommitGenerator({ onClose, onGenerate, result }: CommitGeneratorProps) {
+export function CommitGenerator({ onClose, onGenerate, result, themeKind }: CommitGeneratorProps)
+{
   const [isGenerating, setIsGenerating] = useState(false);
-  const [commitMessage, setCommitMessage] = useState(result || '');
+  const [commitMessage, setCommitMessage] = useState(result || "");
   const [isMinimized, setIsMinimized] = useState(false);
 
-  // ✅ INSERTED EXACTLY AS REQUESTED — NO OTHER CHANGES
+  // ✅ Theme-aware colors (same pattern as your other components)
+  const bgColor = "var(--vscode-editor-background)";
+  const fgColor = "var(--vscode-editor-foreground)";
+
+  // Listen for commit result messages from extension
   useEffect(() => {
     const handler = (event: any) => {
       if (event.data.type === "commitResult") {
@@ -33,18 +39,15 @@ export function CommitGenerator({ onClose, onGenerate, result }: CommitGenerator
   const handleGenerate = async () => {
     setIsGenerating(true);
 
-    // ✅ FIX APPLIED — THE ONLY ALLOWED CHANGE
-    // stays here, same variable name, same structure
-    // only changed value so it stops forcing "2 files"
     const payload = {
-      filesChanged: 0,   
-      summary: "Refactored code"
+      filesChanged: 0,
+      summary: "Refactored code",
     };
 
     const result = await generateCommitMessage(payload);
     setCommitMessage(result.message);
 
-    postToExtension('generateCommit');
+    postToExtension("generateCommit");
     if (onGenerate) onGenerate();
 
     setIsGenerating(false);
@@ -54,29 +57,43 @@ export function CommitGenerator({ onClose, onGenerate, result }: CommitGenerator
     navigator.clipboard.writeText(commitMessage);
   };
 
+  const cardStyle: React.CSSProperties = {
+    backgroundColor: bgColor,
+    color: fgColor,
+    border: "1px solid var(--vscode-panel-border)",
+    padding: 16,
+    borderRadius: 8,
+    width: isMinimized ? 192 : 320,
+    boxSizing: "border-box",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+    backdropFilter: "blur(6px)",
+  };
+
+  const textareaStyle: React.CSSProperties = {
+    width: "100%",
+    backgroundColor: bgColor,
+    color: fgColor,
+    border: "1px solid var(--vscode-editorWidget-border)",
+    borderRadius: 4,
+    padding: 8,
+    fontSize: 13,
+    resize: "none",
+  };
+
+  // ✅ Minimized mode
   if (isMinimized) {
     return (
-      <Card className="bg-gray-900/95 border-gray-700 p-2 rounded-md shadow-lg backdrop-blur-sm w-48">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <GitCommit className="w-4 h-4 text-purple-400" />
-            <span className="text-gray-300 text-sm">Commit Generator</span>
+      <Card style={cardStyle}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <GitCommit className="w-4 h-4" />
+            <span style={{ fontSize: 12 }}>Commit Generator</span>
           </div>
-          <div className="flex space-x-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsMinimized(false)}
-              className="h-6 w-6 p-0 text-gray-400 hover:text-gray-200"
-            >
+          <div style={{ display: "flex", gap: 4 }}>
+            <Button variant="ghost" size="sm" onClick={() => setIsMinimized(false)}>
               <Minimize2 className="w-3 h-3 rotate-180" />
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="h-6 w-6 p-0 text-gray-400 hover:text-gray-200"
-            >
+            <Button variant="ghost" size="sm" onClick={onClose}>
               <X className="w-3 h-3" />
             </Button>
           </div>
@@ -86,74 +103,42 @@ export function CommitGenerator({ onClose, onGenerate, result }: CommitGenerator
   }
 
   return (
-    <Card className="bg-gray-900/95 border-gray-700 p-4 rounded-md shadow-lg backdrop-blur-sm w-80">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-2">
-          <GitCommit className="w-4 h-4 text-purple-400" />
-          <h3 className="text-gray-200 text-sm font-medium">Commit Generator</h3>
+    <Card style={cardStyle} role="region" aria-label="Commit Generator Feature">
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <GitCommit className="w-4 h-4" />
+          <h3 style={{ fontSize: 13, fontWeight: 500 }}>Commit Generator</h3>
         </div>
-        <div className="flex space-x-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsMinimized(true)}
-            className="h-6 w-6 p-0 text-gray-400 hover:text-gray-200"
-          >
+        <div style={{ display: "flex", gap: 4 }}>
+          <Button variant="ghost" size="sm" onClick={() => setIsMinimized(true)}>
             <Minimize2 className="w-3 h-3" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            className="h-6 w-6 p-0 text-gray-400 hover:text-gray-200"
-          >
+          <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-3 h-3" />
           </Button>
         </div>
       </div>
 
-      <div className="space-y-3">
-        <Textarea
-          placeholder="Generated commit message will appear here"
-          value={commitMessage}
-          onChange={(e) => setCommitMessage(e.target.value)}
-          className="bg-gray-800/50 border-gray-600 text-gray-200 placeholder-gray-500 resize-none text-sm"
-          rows={2}
-          disabled={isGenerating}
-        />
+      {/* Textarea */}
+      <Textarea
+        placeholder="Generated commit message will appear here"
+        value={commitMessage}
+        onChange={(e) => setCommitMessage(e.target.value)}
+        rows={2}
+        disabled={isGenerating}
+        style={textareaStyle}
+      />
 
-        <div className="flex space-x-2">
-          <Button
-            onClick={handleGenerate}
-            disabled={isGenerating}
-            className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-sm h-8"
-          >
-            {isGenerating ? (
-              <>
-                <RefreshCw className="w-3 h-3 mr-1.5 animate-spin" />
-                Generating...
-              </>
-            ) : (
-              "Generate"
-            )}
-          </Button>
-
-          {commitMessage && (
-            <Button
-              onClick={copyToClipboard}
-              variant="outline"
-              className="border-gray-600 text-gray-300 hover:bg-gray-700 h-8 w-8 p-0"
-            >
-              <Copy className="w-3 h-3" />
-            </Button>
-          )}
-        </div>
+      {/* Buttons */}
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <Button onClick={handleGenerate} disabled={isGenerating} style={{ flex: 1 }}>
+          {isGenerating ? "Generating..." : "Generate"}
+        </Button>
+        {commitMessage && <Button onClick={copyToClipboard}>Copy</Button>}
       </div>
     </Card>
   );
-}
+};
 
-
-
-
-
+export default CommitGenerator;

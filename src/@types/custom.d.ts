@@ -1,3 +1,6 @@
+declare interface Window {
+  initialThemeKind?: number;
+}
 declare global {
   interface Window {
     acquireVsCodeApi?: () => {

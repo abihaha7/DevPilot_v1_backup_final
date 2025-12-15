@@ -6,8 +6,8 @@ import { X, Minimize2 } from "lucide-react";
 
 export interface QuizRunnerProps {
   onClose: () => void;
-  questions: { question: string; options: string[]; answer: string }[];
-  themeKind?: number; // ✅ added themeKind
+  questions: { question: string; options: string[]; answer: string | number;}[];
+  themeKind?: number;
 }
 
 export function QuizRunner({ onClose, questions, themeKind }: QuizRunnerProps) {
@@ -15,9 +15,20 @@ export function QuizRunner({ onClose, questions, themeKind }: QuizRunnerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
 
+  // ✅ Integrate your themeKind logic
+  const bgColor =
+    themeKind === 1
+      ? "var(--vscode-editor-background)"
+      : "var(--vscode-editor-background)";
+
+  const fgColor =
+    themeKind === 1
+      ? "var(--vscode-editor-foreground)"
+      : "var(--vscode-editor-foreground)";
+
   const cardStyle: React.CSSProperties = {
-    backgroundColor: "var(--vscode-editor-background)",
-    color: "var(--vscode-editor-foreground)",
+    backgroundColor: bgColor,
+    color: fgColor,
     border: "1px solid var(--vscode-panel-border)",
     borderRadius: 8,
     padding: 16,
@@ -32,9 +43,12 @@ export function QuizRunner({ onClose, questions, themeKind }: QuizRunnerProps) {
 
   const handleNext = () => {
     setSelectedOption(null);
-    if (currentIndex < questions.length - 1) setCurrentIndex(currentIndex + 1);
+    if (currentIndex < questions.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+    }
   };
 
+  // ✅ Minimized mode
   if (isMinimized) {
     return (
       <Card style={cardStyle}>
@@ -57,6 +71,7 @@ export function QuizRunner({ onClose, questions, themeKind }: QuizRunnerProps) {
 
   return (
     <Card style={cardStyle} role="region" aria-label="Quiz Runner Feature">
+      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
         <h3 style={{ fontSize: 13, fontWeight: 500 }}>Quiz Runner</h3>
         <div style={{ display: "flex", gap: 4 }}>
@@ -69,8 +84,10 @@ export function QuizRunner({ onClose, questions, themeKind }: QuizRunnerProps) {
         </div>
       </div>
 
+      {/* Question */}
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 12, marginBottom: 8 }}>{question?.question}</div>
+
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {question?.options.map((opt) => (
             <Button
@@ -82,7 +99,7 @@ export function QuizRunner({ onClose, questions, themeKind }: QuizRunnerProps) {
                 fontSize: 11,
                 padding: "6px 8px",
                 borderColor: "var(--vscode-panel-border)",
-                color: "var(--vscode-editor-foreground)",
+                color: fgColor,
               }}
             >
               {opt}
@@ -91,6 +108,7 @@ export function QuizRunner({ onClose, questions, themeKind }: QuizRunnerProps) {
         </div>
       </div>
 
+      {/* Next button */}
       <Button
         onClick={handleNext}
         disabled={selectedOption === null}

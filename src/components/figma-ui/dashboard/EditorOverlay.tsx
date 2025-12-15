@@ -29,14 +29,15 @@ export const EditorOverlay: React.FC = () => {
   const [todos, setTodos] = useState<any[]>([]);
   const [commitSuggestion, setCommitSuggestion] = useState<string>("");
   const [themeKind, setThemeKind] = useState<number>(
-    window.initialThemeKind ?? 2 // fallback: light/dark/high contrast
+    window.initialThemeKind ?? 2
   );
 
   useEffect(() => {
     postToExtension("requestActiveEditor");
 
-    // ---- MESSAGE SUBSCRIPTIONS ----
-    const offActive = onExtensionMessage("activeEditor", (payload) => setActive(payload));
+    const offActive = onExtensionMessage("activeEditor", (payload) =>
+      setActive(payload)
+    );
     const offSel = onExtensionMessage("cursorSelection", (payload) =>
       setSelections(payload?.selections || [])
     );
@@ -50,8 +51,11 @@ export const EditorOverlay: React.FC = () => {
       setCommitSuggestion(payload?.text || "")
     );
     const offTheme = onExtensionMessage("theme", (payload) => {
-      if (typeof payload?.kind === "number") setThemeKind(payload.kind);
-      else setThemeKind(window.initialThemeKind ?? 2);
+      if (typeof payload?.kind === "number") {
+        setThemeKind(payload.kind);
+      } else {
+        setThemeKind(window.initialThemeKind ?? 2);
+      }
     });
 
     return () => {
@@ -64,24 +68,40 @@ export const EditorOverlay: React.FC = () => {
     };
   }, []);
 
-  // ---- INTERACTIONS ----
-  const requestCommit = () => postToExtension("generateCommit", {});
-  const openFile = () => {
-    if (active?.uri) postToExtension("openFile", { uri: active.uri });
+/* ------------------------ Actions ------------------------ */
+const requestCommit = () => postToExtension("generateCommit", {});
+
+const openFile = () => {
+  if (!active?.uri) return;
+
+  postToExtension("openFile", {
+    uri: active.uri
+  });
+};
+
+  /* ------------------------ Styles (VS Code Tokens ONLY) ------------------------ */
+  const outerStyle: React.CSSProperties = {
+    padding: "var(--vscode-editor-padding)",
+    boxSizing: "border-box",
   };
 
   const containerStyle: React.CSSProperties = {
     border: "1px solid var(--vscode-panel-border)",
     backgroundColor: "var(--vscode-editorHoverWidget-background)",
     color: "var(--vscode-editor-foreground)",
-    padding: 12,
-    borderRadius: 8,
-    width: 340,
+    padding: "var(--vscode-editor-padding)",
+    borderRadius: "var(--vscode-border-radius)",
+    width: "var(--vscode-editor-widget-width)",
     boxSizing: "border-box",
   };
 
+  const mutedText: React.CSSProperties = {
+    fontSize: "var(--vscode-font-size)",
+    color: "var(--vscode-descriptionForeground)",
+  };
+
   return (
-    <div style={{ padding: 8, boxSizing: "border-box" }}>
+    <div style={outerStyle}>
       <div style={containerStyle}>
         {/* HEADER */}
         <div
@@ -89,19 +109,26 @@ export const EditorOverlay: React.FC = () => {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: 8,
+            marginBottom: "var(--vscode-editor-padding)",
           }}
         >
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>{active?.fileName || "No file"}</div>
-            <div style={{ fontSize: 11, color: "var(--vscode-descriptionForeground)" }}>
+            <div
+              style={{
+                fontSize: "var(--vscode-font-size)",
+                fontWeight: "var(--vscode-font-weight-bold)",
+              }}
+            >
+              {active?.fileName || "No file"}
+            </div>
+            <div style={mutedText}>
               {active?.languageId
                 ? `${active.languageId} • ${active?.lineCount ?? 0} lines`
                 : ""}
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: "var(--vscode-editor-padding)" }}>
             <Button onClick={openFile} className="text-xs h-8">
               Open
             </Button>
@@ -112,13 +139,7 @@ export const EditorOverlay: React.FC = () => {
         </div>
 
         {/* STATS */}
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--vscode-descriptionForeground)",
-            marginBottom: 8,
-          }}
-        >
+        <div style={mutedText}>
           Selections: {selections.length} • TODOs: {todos.length}
         </div>
 
@@ -126,17 +147,31 @@ export const EditorOverlay: React.FC = () => {
         {commitSuggestion ? (
           <div
             style={{
-              marginTop: 8,
-              padding: 8,
-              borderRadius: 6,
+              marginTop: "var(--vscode-editor-padding)",
+              padding: "var(--vscode-editor-padding)",
+              borderRadius: "var(--vscode-border-radius)",
               backgroundColor: "var(--vscode-editor-background)",
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 600 }}>Commit suggestion</div>
-            <div style={{ fontSize: 12, marginTop: 6 }}>{commitSuggestion}</div>
+            <div
+              style={{
+                fontSize: "var(--vscode-font-size)",
+                fontWeight: "var(--vscode-font-weight-bold)",
+              }}
+            >
+              Commit suggestion
+            </div>
+            <div
+              style={{
+                fontSize: "var(--vscode-font-size)",
+                marginTop: "var(--vscode-editor-padding)",
+              }}
+            >
+              {commitSuggestion}
+            </div>
           </div>
         ) : (
-          <div style={{ fontSize: 12, color: "var(--vscode-descriptionForeground)" }}>
+          <div style={mutedText}>
             No commit suggestion yet — click “Suggest Commit”.
           </div>
         )}
@@ -145,12 +180,13 @@ export const EditorOverlay: React.FC = () => {
         {fileDiff && (
           <pre
             style={{
-              marginTop: 8,
-              fontSize: 11,
-              maxHeight: 120,
+              marginTop: "var(--vscode-editor-padding)",
+              fontSize: "var(--vscode-editor-font-size)",
+              maxHeight: "var(--vscode-editor-max-height)",
               overflow: "auto",
               backgroundColor: "transparent",
               border: "none",
+              color: "var(--vscode-editor-foreground)",
             }}
           >
             {fileDiff.slice(0, 1000)}
@@ -158,7 +194,7 @@ export const EditorOverlay: React.FC = () => {
         )}
 
         {/* THEME INFO */}
-        <div style={{ marginTop: 12, fontSize: 12, color: "var(--vscode-descriptionForeground)" }}>
+        <div style={{ ...mutedText, marginTop: "var(--vscode-editor-padding)" }}>
           Theme: {themeKind}
         </div>
       </div>
@@ -169,7 +205,10 @@ export const EditorOverlay: React.FC = () => {
 /* ----------------------- Webview-Safe Mount ----------------------- */
 function renderOverlay() {
   const root = document.getElementById("root");
-  if (!root) return console.error(" #root not found for EditorOverlay");
+  if (!root) {
+    console.error("#root not found for EditorOverlay");
+    return;
+  }
 
   const app = ReactDOM.createRoot(root);
   app.render(<EditorOverlay />);

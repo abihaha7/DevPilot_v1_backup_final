@@ -5,30 +5,30 @@
   "version": "0.0.1",
   "publisher": "hooriaamir",
   "main": "./out/extension.js",
+  "type": "commonjs",
   "engines": {
     "vscode": "^1.104.0"
   },
   "categories": ["Other"],
+
   "activationEvents": [
-    "onCommand:devpilot.helloWorld",
-    "onCommand:devpilot.openDashboard",
-    "onCommand:devpilot.setOpenAIKey"
-  ],
+  "onView:devpilot.sidebar",
+  "onView:devpilot.editorOverlay",
+
+  "onCommand:devpilot.openPanel",
+  "onCommand:devpilot.setOpenAIKey",
+  "onCommand:devpilot.openCommitGenerator",
+  "onCommand:devpilot.openChatbot",
+  "onCommand:devpilot.openTodoTracker",
+
+  "onCommand:devpilot.quizHtmlEasy",
+  "onCommand:devpilot.quizHtmlMedium",
+  "onCommand:devpilot.quizCssEasy",
+  "onCommand:devpilot.quizCssHard",
+  "onCommand:devpilot.quizJsEasy",
+  "onCommand:devpilot.quizJsMedium"
+],
   "contributes": {
-    "commands": [
-      {
-        "command": "devpilot.helloWorld",
-        "title": "DevPilot: Hello World"
-      },
-      {
-        "command": "devpilot.openDashboard",
-        "title": "DevPilot: Open Dashboard"
-      },
-      {
-        "command": "devpilot.setOpenAIKey",
-        "title": "DevPilot: Set OpenAI Key"
-      }
-    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -38,30 +38,143 @@
         }
       ]
     },
+
     "views": {
       "devpilot": [
         {
-          "id": "devpilot.dashboard",
+          "type": "webview",
+          "id": "devpilot.sidebar",
           "name": "Dashboard"
+        },
+        {
+          "type": "webview",
+          "id": "devpilot.editorOverlay",
+          "name": "Editor Overlay"
         }
       ]
+    },
+
+    "commands": [
+      {
+        "command": "devpilot.openPanel",
+        "title": "DevPilot: Open Right Panel"
+      },
+      {
+        "command": "devpilot.setOpenAIKey",
+        "title": "DevPilot: Set OpenAI API Key"
+      },
+      {
+        "command": "devpilot.openCommitGenerator",
+        "title": "DevPilot: Open Commit Generator"
+      },
+      {
+        "command": "devpilot.openChatbot",
+        "title": "DevPilot: Open Learning Chatbot"
+      },
+      {
+        "command": "devpilot.openTodoTracker",
+        "title": "DevPilot: Open Todo Tracker"
+      },
+      {
+        "command": "devpilot.quizHtmlEasy",
+        "title": "DevPilot: HTML Quiz (Easy)"
+      },
+      {
+        "command": "devpilot.quizHtmlMedium",
+        "title": "DevPilot: HTML Quiz (Medium)"
+      },
+      {
+        "command": "devpilot.quizCssHard",
+        "title": "DevPilot: CSS Quiz (Hard)"
+      },
+      {
+        "command": "devpilot.quizCssEasy",
+        "title": "DevPilot: CSS Quiz (Easy)"
+      },
+      {
+        "command": "devpilot.quizJsMedium",
+        "title": "DevPilot: JavaScript Quiz (Medium)"
+      },
+      {
+        "command": "devpilot.quizJsEasy",
+        "title": "DevPilot: JavaScript Quiz (Easy)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "devpilot.openPanel" },
+        { "command": "devpilot.openCommitGenerator" },
+        { "command": "devpilot.openChatbot" },
+        { "command": "devpilot.openTodoTracker" },
+        { "command": "devpilot.quizHtmlEasy" },
+        { "command": "devpilot.quizCssHard" },
+        { "command": "devpilot.quizJsMedium" },
+        { "command": "devpilot.quizHtmlMedium" },
+        { "command": "devpilot.quizCssEasy" },
+        { "command": "devpilot.quizJsEasy" }
+      ],
+
+      "editor/title": [
+        {
+          "command": "devpilot.openCommitGenerator",
+          "when": "editorTextFocus",
+          "group": "navigation"
+        }
+      ]
+    },
+
+    "colors": [
+      {
+        "id": "devpilot.dashboardBackground",
+        "description": "Background color for DevPilot dashboard",
+        "defaults": {
+          "dark": "#1e1e1e",
+          "light": "#ffffff",
+          "highContrast": "#000000"
+        }
+      },
+      {
+        "id": "devpilot.dashboardForeground",
+        "description": "Foreground color for DevPilot dashboard",
+        "defaults": {
+          "dark": "#ffffff",
+          "light": "#000000",
+          "highContrast": "#ffffff"
+        }
+      }
+    ],
+
+    "configuration": {
+      "type": "object",
+      "title": "DevPilot Settings",
+      "properties": {
+        "devpilot.enableTelemetry": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable DevPilot usage telemetry (opt-in)."
+        }
+      }
     }
   },
+
   "scripts": {
     "vscode:prepublish": "npm run package",
-
     "compile": "npm run check-types && npm run lint && node esbuild.mjs",
-    "watch": "node esbuild.mjs --watch",
-    
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.mjs --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run check-types && npm run lint && node esbuild.mjs --production",
-
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-
-    "pretest": "npm run compile && npm run lint",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "build": "npm run compile:ext && npm run build-dashboard",
+    "compile:ext": "tsc -p . --outDir out",
+    "build-dashboard": "node esbuild.mjs"
   },
-  "type": "commonjs",
+
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",
     "@types/mocha": "^10.0.10",
@@ -81,16 +194,19 @@
     "tailwindcss": "^4.1.14",
     "typescript": "^5.9.3"
   },
+
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
-    "@radix-ui/react-aspect-ratio": "^1.1.7",
+    "@radix-ui/react-aspect-ratio": "^1.1.8",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-checkbox": "^1.3.3",
+    "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-context-menu": "^2.2.16",
+    "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-hover-card": "^1.1.15",
-    "@radix-ui/react-label": "^2.1.7",
+    "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-menubar": "^1.1.16",
     "@radix-ui/react-navigation-menu": "^1.2.14",
     "@radix-ui/react-popover": "^1.1.15",
@@ -98,13 +214,13 @@
     "@radix-ui/react-radio-group": "^1.3.8",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-select": "^2.2.6",
-    "@radix-ui/react-separator": "^1.1.7",
+    "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slider": "^1.3.6",
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-toggle": "^1.1.10",
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "chart.js": "^4.5.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -112,18 +228,16 @@
     "input-otp": "^1.4.2",
     "lucide-react": "^0.441.0",
     "next-themes": "^0.4.6",
-    "openai": "^5.23.2",
+    "openai": "^6.10.0",
     "react": "^19.2.0",
-    "react-day-picker": "^9.11.0",
+    "react-day-picker": "^9.12.0",
     "react-dom": "^19.2.0",
-    "react-hook-form": "^7.63.0",
+    "react-hook-form": "^7.68.0",
     "react-resizable-panels": "^3.0.6",
-    "recharts": "^3.2.1",
+    "recharts": "^3.5.1",
     "simple-git": "^3.28.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.1",
     "vaul": "^1.1.2"
   }
 }
-
-
