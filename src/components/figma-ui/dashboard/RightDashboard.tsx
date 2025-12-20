@@ -1,87 +1,105 @@
-// src/components/figma-ui/dashboard/RightDashboard.tsx
-console.log("RightDashboard mounted");
-
 import React, { useEffect, useMemo, useState, Suspense } from "react";
 import { Button } from "../ui/button.js";
 import { postToExtension, onExtensionMessage } from "../../../utils/vscodeBridge";
 import { dashboardData } from "../../../data/dashboard-data";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Lazy-loaded feature modules (default exports only)
-// ─────────────────────────────────────────────────────────────────────────────
+/* ---------------- LAZY FEATURES ---------------- */
+
 const CommitGenerator = React.lazy(() => import("../features/CommitGenerator.js"));
 const LearningChatbot = React.lazy(() => import("../features/LearningChatbot.js"));
 const TodoTracker = React.lazy(() => import("../features/TodoTracker.js"));
 const QuizRunner = React.lazy(() => import("../features/QuizRunner.js"));
 const HelpPanel = React.lazy(() => import("../features/HelpPanel.js"));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
+/* ---------------- TYPES ---------------- */
+
 interface RightDashboardProps {
-  /** Provider-controlled mode (preferred) */
   activeFeature?: string | null;
   themeKind?: number;
   onClose?: () => void;
 
-  /** Legacy / standalone mode (DO NOT REMOVE) */
   initialFeature?: string | null;
   initialThemeKind?: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────────────────────────────────────
-export const RightDashboard: React.FC<RightDashboardProps> = ({
+/* ---------------- COMPONENT ---------------- */
+
+export function RightDashboard({
   activeFeature: controlledFeature,
-  themeKind: controlledThemeKind,
   onClose,
   initialFeature = null,
   initialThemeKind = 2,
-}) => {
-  // ── Internal fallback state (used only when uncontrolled)
-  const [internalFeature, setInternalFeature] = useState<string | null>(initialFeature);
-  const [internalThemeKind, setInternalThemeKind] = useState<number>(initialThemeKind);
+  themeKind: controlledThemeKind,
+}: RightDashboardProps) {
+  const [internalFeature, setInternalFeature] =
+    useState<string | null>(initialFeature);
+  const [internalThemeKind, setInternalThemeKind] =
+    useState<number>(initialThemeKind);
+  const [chatReply, setChatReply] = useState("");
 
-  const activeFeature = controlledFeature !== undefined ? controlledFeature : internalFeature;
-  const themeKind = controlledThemeKind !== undefined ? controlledThemeKind : internalThemeKind;
+  const activeFeature =
+    controlledFeature !== undefined
+      ? controlledFeature
+      : internalFeature;
+
+  const themeKind =
+    controlledThemeKind !== undefined
+      ? controlledThemeKind
+      : internalThemeKind;
+
+  /* ---------------- READY ---------------- */
+
   useEffect(() => {
-  if (activeFeature != null) return;
+    postToExtension("ready", {});
+  }, []);
 
-  // Default feature on first mount
-  postToExtension("command", {
-    command: "devpilot.setActiveFeature",
-    args: [{ feature: "chat" }],
-  });
-}, []); // run once
+  /* ---------------- MESSAGE BINDINGS ---------------- */
 
-  // ── Extension message bindings (legacy + safety)
   useEffect(() => {
-    if (controlledFeature !== undefined) return;
-
     const offSwitch = onExtensionMessage("switchFeature", (payload: any) => {
-      const f = payload?.feature ?? payload ?? null;
-      setInternalFeature(f);
+      if (!payload) return;
+      if (typeof payload === "string") {
+        setInternalFeature(payload);
+      } else if (payload.feature) {
+        setInternalFeature(payload.feature);
+      }
     });
 
     const offTheme = onExtensionMessage("theme", (payload: any) => {
-      if (typeof payload?.kind === "number") setInternalThemeKind(payload.kind);
-      else if (typeof payload === "number") setInternalThemeKind(payload);
+      if (typeof payload?.kind === "number") {
+        setInternalThemeKind(payload.kind);
+      }
     });
 
-    const offRestore = onExtensionMessage("restoreFeature", (payload: any) => {
-      const f = payload?.feature ?? payload;
-      if (f) setInternalFeature(f);
+    const offChatReply = onExtensionMessage("chatReply", (payload: any) => {
+      if (typeof payload?.text === "string") {
+        setChatReply(payload.text);
+      }
     });
 
     return () => {
       offSwitch?.();
       offTheme?.();
-      offRestore?.();
+      offChatReply?.();
     };
-  }, [controlledFeature]);
+  }, []);
 
-  // ── Commands
+  useEffect(() => {
+  if (!activeFeature?.startsWith("quiz-")) return;
+
+  // expected format: quiz-html-easy
+  const [, topic, level] = activeFeature.split("-");
+
+  if (
+    (topic === "html" || topic === "css" || topic === "js") &&
+    (level === "easy" || level === "medium" || level === "hard")
+  ) {
+    setQuizPath({ topic, level });
+  }
+}, [activeFeature]);
+
+/* ---------------- COMMAND HELPERS ---------------- */
+
   const openFeature = (feature: string) => {
     postToExtension("command", {
       command: "devpilot.setActiveFeature",
@@ -91,10 +109,6 @@ export const RightDashboard: React.FC<RightDashboardProps> = ({
 
   const closeFeature = () => {
     if (onClose) return onClose();
-    postToExtension("command", {
-      command: "devpilot.setActiveFeature",
-      args: [{ feature: null }],
-    });
     setInternalFeature(null);
   };
 
@@ -102,25 +116,40 @@ export const RightDashboard: React.FC<RightDashboardProps> = ({
     postToExtension("chatMessage", { text });
   };
 
-  // ── Derived quiz config
-  const quizQuestions = useMemo(() => {
-    if (!activeFeature?.startsWith("quiz-")) return [];
-    return (
-      dashboardData.practiceProblems.find((p) => p.id === activeFeature)?.questions || []
-    );
-  }, [activeFeature]);
+  /* ---------------- DERIVED DATA ---------------- */
+  const [quizPath, setQuizPath] = useState<{
+    topic: "html" | "css" | "js";
+    level: "easy" | "medium" | "hard";
+  } | null>(null);
 
-  // ── Animation helpers (CSS-driven, provider-safe)
-  const featureKey = activeFeature ?? "home";
+  const quizQuestions = useMemo(() => {
+    if (!quizPath) return [];
+
+    const { topic, level } = quizPath;
+    const problems = dashboardData.practiceProblems[topic];
+
+    if (!problems) return [];
+
+    if (level in problems) {
+      return problems[level as keyof typeof problems];
+    }
+
+    return [];
+  }, [quizPath]);
+
+  /* ---------------- RENDER ---------------- */
 
   return (
-    <div
-      role="region"
-      aria-label="DevPilot Right Dashboard"
-      className="devpilot-right-dashboard"
-    >
+  //   <div style={{ color: "red", padding: 20, fontSize: 14 }}>
+  //   DEBUG: RightDashboard rendered
+  //   <br />
+  //   activeFeature = {String(activeFeature)}
+  // </div>
+
+    <div className="devpilot-right-dashboard">
+
       <Suspense fallback={<div className="dp-loading">Loading…</div>}>
-        <div key={featureKey} className="dp-feature-surface">
+        <div className="dp-feature-surface">
           {activeFeature === "commit" && (
             <CommitGenerator onClose={closeFeature} themeKind={themeKind} />
           )}
@@ -129,7 +158,7 @@ export const RightDashboard: React.FC<RightDashboardProps> = ({
             <LearningChatbot
               onClose={closeFeature}
               onSend={sendChat}
-              reply={""}
+              reply={chatReply}
               autoFocus
               themeKind={themeKind}
             />
@@ -168,6 +197,17 @@ export const RightDashboard: React.FC<RightDashboardProps> = ({
                 <Button onClick={() => openFeature("todo")} size="sm">
                   Todo Tracker
                 </Button>
+                <Button onClick={() => openFeature("quiz-html-easy")} size="sm">
+                  HTML (Easy)
+                </Button>
+
+                <Button onClick={() => openFeature("quiz-css-hard")} size="sm">
+                  CSS (Hard)
+                </Button>
+
+                <Button onClick={() => openFeature("quiz-js-medium")} size="sm">
+                  JS (Medium)
+                </Button>
                 <Button onClick={() => openFeature("help")} size="sm">
                   Help
                 </Button>
@@ -177,7 +217,7 @@ export const RightDashboard: React.FC<RightDashboardProps> = ({
         </div>
       </Suspense>
     </div>
-  );
-};
+ );
+}
 
 export default RightDashboard;

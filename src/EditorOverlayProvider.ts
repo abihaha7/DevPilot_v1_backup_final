@@ -25,18 +25,34 @@ export class EditorOverlayProvider implements vscode.WebviewViewProvider {
 
     /* ---------------- Message Listener ---------------- */
 
-view.webview.onDidReceiveMessage((msg) => {
-  if (!msg?.type) {
-    return;
-  }
+    view.webview.onDidReceiveMessage((msg) => {
+      if (!msg?.type) {
+        return;
+      }
 
-  // Forward EVERYTHING to extension core
-  vscode.commands.executeCommand(
-    "devpilot.__internalMessage",
-    msg,
-    view
-  );
-});
+            // 🔁 Explicit relay to RIGHT dashboard when requested
+      view.webview.onDidReceiveMessage((msg) => {
+        if (!msg?.type) {return;}
+
+        // 🚫 DO NOT forward state sync messages
+        if (msg.type === "switchFeature" || msg.type === "theme") {
+          return;
+        }
+
+        vscode.commands.executeCommand("devpilot.route", {
+          target: "right",
+          type: msg.type,
+          payload: msg.payload,
+        });
+      });
+
+      // 🔒 Default: forward EVERYTHING to extension core
+      vscode.commands.executeCommand(
+        "devpilot.__internalMessage",
+        msg,
+        view
+      );
+    });
 
     /* ---------------- Theme Sync ---------------- */
 
@@ -49,6 +65,10 @@ view.webview.onDidReceiveMessage((msg) => {
       } catch {}
     });
   }
+
+public postMessage(message: unknown) {
+  this._view?.webview.postMessage(message);
+}
 
   /* ---------------- HTML / CSP ---------------- */
 
@@ -87,28 +107,19 @@ view.webview.onDidReceiveMessage((msg) => {
       )
     );
 
-const csp = `
-  default-src 'none';
-  connect-src ${webview.cspSource} https:;
-  img-src ${webview.cspSource} https: data:;
-  font-src ${webview.cspSource} https: data:;
-  style-src ${webview.cspSource} 'unsafe-inline';
-  script-src ${webview.cspSource} 'nonce-${nonce}';
-`;
-
-return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
- <meta http-equiv="Content-Security-Policy"
-  content="
-    default-src 'none';
-    img-src ${webview.cspSource} https:;
-    style-src ${webview.cspSource} 'unsafe-inline';
-    script-src 'nonce-${nonce}';
-    connect-src ${webview.cspSource};
-  "
-/>
+  <meta http-equiv="Content-Security-Policy"
+    content="
+      default-src 'none';
+      img-src ${webview.cspSource} https:;
+      style-src ${webview.cspSource} 'unsafe-inline';
+      script-src 'nonce-${nonce}';
+      connect-src ${webview.cspSource};
+    "
+  />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
@@ -129,19 +140,19 @@ return `<!DOCTYPE html>
 <body class="devpilot-root">
   <div id="root"></div>
 
-<script nonce="${nonce}">
-  (function () {
-    if (!window.vscode) {
-      window.vscode = acquireVsCodeApi();
-    }
+  <script nonce="${nonce}">
+    (function () {
+      if (!window.vscode) {
+        window.vscode = acquireVsCodeApi();
+      }
 
-    window.acquireVsCodeApi = () => window.vscode;
+      window.acquireVsCodeApi = () => window.vscode;
 
-    window.vscode.postMessage({
-      type: "ready"
-    });
-  })();
-</script>
+      window.vscode.postMessage({
+        type: "ready"
+      });
+    })();
+  </script>
 
   <script nonce="${nonce}" src="${jsUri}"></script>
 </body>

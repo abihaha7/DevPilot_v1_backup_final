@@ -27,17 +27,38 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 
     view.webview.html = this.getHtml(view.webview);
 
-    // Sidebar itself does not own feature state
-    // It only signals readiness
+    // Sidebar does NOT own state
+    // It routes intent → extension
     view.webview.onDidReceiveMessage((msg) => {
-  vscode.commands.executeCommand(
-    "devpilot.__internalMessage",
-    msg,
-    view
-  );
-});
+      if (!msg?.type) {return;}
 
+    view.webview.onDidReceiveMessage((msg) => {
+      if (!msg?.type) {return;}
+
+      // 🚫 DO NOT forward state sync messages
+      if (msg.type === "switchFeature" || msg.type === "theme") {
+        return;
+      }
+
+      vscode.commands.executeCommand("devpilot.route", {
+        target: "right",
+        type: msg.type,
+        payload: msg.payload,
+      });
+    });
+
+      // 🔒 Everything else goes through internal message bus
+      vscode.commands.executeCommand(
+        "devpilot.__internalMessage",
+        msg,
+        view
+      );
+    });
   }
+
+  public postMessage(message: unknown) {
+  this._view?.webview.postMessage(message);
+}
 
   private getHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
@@ -64,28 +85,19 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
       )
     );
 
-const csp = `
-  default-src 'none';
-  connect-src ${webview.cspSource} https:;
-  img-src ${webview.cspSource} https: data:;
-  font-src ${webview.cspSource} https: data:;
-  style-src ${webview.cspSource} 'unsafe-inline';
-  script-src ${webview.cspSource} 'nonce-${nonce}';
-`;
-
-return /* html */ `<!DOCTYPE html>
+    return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-  content="
-    default-src 'none';
-    img-src ${webview.cspSource} https:;
-    style-src ${webview.cspSource} 'unsafe-inline';
-    script-src 'nonce-${nonce}';
-    connect-src ${webview.cspSource};
-  "
-/>
+    content="
+      default-src 'none';
+      img-src ${webview.cspSource} https:;
+      style-src ${webview.cspSource} 'unsafe-inline';
+      script-src 'nonce-${nonce}';
+      connect-src ${webview.cspSource};
+    "
+  />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <link rel="stylesheet" href="${globalsCss}" />

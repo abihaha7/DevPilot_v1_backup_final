@@ -24,7 +24,7 @@ const extOut = path.resolve("out/extension.js");
 const dashEntry = path.resolve("src/components/figma-ui/dashboard/FigmaDashboard.tsx");
 const dashOutJS = path.resolve("out/components/figma-ui/dashboard/FigmaDashboard.js");
 
-const rightDashboardEntry = path.resolve("src/components/figma-ui/dashboard/RightDashboard.tsx");
+const rightDashboardEntry = path.resolve("src/components/figma-ui/dashboard/rightDashboard.entry.tsx");
 const rightDashboardOutJS = path.resolve("out/components/figma-ui/dashboard/RightDashboard.js");
 
 const editorOverlayEntry = path.resolve("src/components/figma-ui/dashboard/EditorOverlay.tsx");

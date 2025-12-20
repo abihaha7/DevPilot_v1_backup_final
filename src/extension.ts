@@ -11,15 +11,18 @@ import { RightDashboardProvider } from "./RightDashboardProvider";
 
 let openaiApiKey: string | undefined;
 let todosRunning = false;
-let rightDashboardReady = false;
 
-// 🔒 Webview references (NOT WebviewView)
+// 🔒 Webview references
 let sidebarWebview: vscode.Webview | null = null;
 let overlayWebview: vscode.Webview | null = null;
 let rightDashboardWebview: vscode.Webview | null = null;
 
-// Right dashboard owner
+// Providers
+let sidebar: SidebarViewProvider;
+let editorOverlay: EditorOverlayProvider;
 let rightDashboard: RightDashboardProvider;
+
+// Single source of truth
 let activeFeature: string | undefined;
 
 /* -------------------------- Webview Attachers ----------------------------- */
@@ -32,27 +35,18 @@ export function attachOverlay(view: vscode.WebviewView) {
   overlayWebview = view.webview;
 }
 
-export function attachRightDashboard(webview: vscode.Webview) {
+export function attachRightDashboard(webview: vscode.Webview | null) {
   rightDashboardWebview = webview;
 }
 
 /* ------------------------------ Broadcasting ------------------------------ */
 
-function broadcast(message: { type: string; payload?: any }) {
+function broadcast(msg: any) {
   try {
-    sidebarWebview?.postMessage(message);
-    overlayWebview?.postMessage(message);
-    rightDashboardWebview?.postMessage(message);
+    sidebarWebview?.postMessage(msg);
+    overlayWebview?.postMessage(msg);
+    rightDashboardWebview?.postMessage(msg);
   } catch {}
-}
-
-function flushRightDashboardState() {
-  if (!rightDashboardReady || !rightDashboardWebview) {return;}
-
-  sendActiveEditor();
-  sendTheme();
-  sendActiveFeature();
-  sendTODOs();
 }
 
 /* -------------------------------- Utilities -------------------------------- */
@@ -69,100 +63,36 @@ function debounce(fn: (...args: any[]) => void, delay = 400) {
 
 export function activate(context: vscode.ExtensionContext) {
   openaiApiKey = context.globalState.get<string>("devpilot.openaiKey");
+  activeFeature = context.globalState.get<string>("devpilot.activeFeature");
 
-  // ✅ Single owner of right panel
-  rightDashboard = new RightDashboardProvider(context);
+  console.log("[DevPilot] Extension activating…");
 
-  /* ---------------- Sidebar ---------------- */
-
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      SidebarViewProvider.viewType,
-      new SidebarViewProvider(context)
-    )
-  );
-
-  /* ---------------- Overlay ---------------- */
-
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      EditorOverlayProvider.viewType,
-      new EditorOverlayProvider(context)
-    )
-  );
-
-  /* ---------------- Commands ---------------- */
+  /* ---------------- Commands (REGISTER FIRST) ---------------- */
 
   const register = (cmd: string, cb: (...args: any[]) => any) =>
     context.subscriptions.push(vscode.commands.registerCommand(cmd, cb));
 
-  register("devpilot.openPanel", () => {
-    rightDashboard.show();
+  register("devpilot.route", (msg?: any) => {
+    if (!msg?.target || !msg?.type) {return;}
+    if (msg.type === "switchFeature") {return;}
 
-    const webview = rightDashboard.webview;
-    if (webview) {
-      attachRightDashboard(webview);
-      rightDashboardReady = false;
-    }
+    if (msg.target === "sidebar") {sidebarWebview?.postMessage(msg);}
+    if (msg.target === "right") {rightDashboardWebview?.postMessage(msg);}
+    if (msg.target === "overlay") {overlayWebview?.postMessage(msg);}
   });
-
-  register("devpilot.setActiveFeature", (arg?: { feature?: string }) => {
-    const feature = arg?.feature;
-    if (!feature) {return;}
-
-    // ✅ FIX: keep runtime state
-    activeFeature = feature;
-    context.globalState.update("devpilot.activeFeature", feature);
-
-    rightDashboard.show();
-
-    const webview = rightDashboard.webview;
-    if (webview) {
-      attachRightDashboard(webview);
-      rightDashboardReady = false;
-    }
-
-    broadcast({
-      type: "switchFeature",
-      payload: { feature },
-    });
-  });
-
-  register("devpilot.setOpenAIKey", async () => {
-    const key = await vscode.window.showInputBox({
-      placeHolder: "Enter OpenAI API Key",
-      password: true,
-      ignoreFocusOut: true,
-    });
-
-    if (key) {
-      openaiApiKey = key;
-      await context.globalState.update("devpilot.openaiKey", key);
-    }
-  });
-
-  /* ---------------- Internal Webview Messages ---------------- */
 
   register(
     "devpilot.__internalMessage",
-    async (
-      message: any,
-      source: vscode.WebviewPanel | vscode.WebviewView | undefined
-    ) => {
+    async (message: any, source: vscode.WebviewPanel | vscode.WebviewView) => {
       if (!message?.type || !source) {return;}
-
-      const respond = (msg: any) => {
-        try {
-          source.webview.postMessage(msg);
-        } catch {}
-      };
 
       switch (message.type) {
         case "ready": {
-          // ✅ FIX: detect by webview identity
-          if (source.webview === rightDashboardWebview) {
-            rightDashboardReady = true;
-            flushRightDashboardState();
+          if (activeFeature) {
+            source.webview.postMessage({
+              type: "switchFeature",
+              payload: { feature: activeFeature },
+            });
           }
           break;
         }
@@ -174,7 +104,7 @@ export function activate(context: vscode.ExtensionContext) {
           activeFeature = feature;
           context.globalState.update("devpilot.activeFeature", feature);
 
-          rightDashboard.show();
+          rightDashboard?.show();
 
           broadcast({
             type: "switchFeature",
@@ -182,29 +112,40 @@ export function activate(context: vscode.ExtensionContext) {
           });
           break;
         }
-
-        case "chatMessage": {
-          const text = message.payload?.text ?? "";
-          const reply = await handleChat(text);
-
-          respond({
-            type: "chatReply",
-            payload: { text: reply },
-          });
-          break;
-        }
-
-        case "generateCommit": {
-          const text = await generateCommitMessage();
-          respond({
-            type: "commitResult",
-            payload: { text },
-          });
-          break;
-        }
       }
     }
   );
+
+  register("devpilot.chatMessage", async (payload?: { text?: string }) => {
+    const text = payload?.text ?? "";
+    const reply = await handleChat(text);
+
+    rightDashboardWebview?.postMessage({
+      type: "chatReply",
+      payload: { text: reply },
+    });
+  });
+
+  /* ---------------- Providers (AFTER commands) ---------------- */
+
+  sidebar = new SidebarViewProvider(context);
+  editorOverlay = new EditorOverlayProvider(context);
+  rightDashboard = new RightDashboardProvider(context);
+
+  /* ---------------- Webview Providers ---------------- */
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      SidebarViewProvider.viewType,
+      sidebar
+    ),
+    vscode.window.registerWebviewViewProvider(
+      EditorOverlayProvider.viewType,
+      editorOverlay
+    )
+  );
+
+  console.log("[DevPilot] Extension activated");
 
   /* ---------------- Editor Sync ---------------- */
 
@@ -227,38 +168,21 @@ export function activate(context: vscode.ExtensionContext) {
   /* ---------------- Theme Sync ---------------- */
 
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveColorTheme(() => {
-      sendTheme();
-    })
+    vscode.window.onDidChangeActiveColorTheme(sendTheme)
   );
 
   /* ---------------- Restore ---------------- */
 
-  const savedFeature = context.globalState.get<string>(
-    "devpilot.activeFeature"
-  );
-
-  if (savedFeature) {
-    activeFeature = savedFeature;
-
+  if (activeFeature) {
     rightDashboard.show();
-
-    const webview = rightDashboard.webview;
-    if (webview) {
-      attachRightDashboard(webview);
-      rightDashboardReady = false;
-    }
-
     broadcast({
       type: "switchFeature",
-      payload: { feature: savedFeature },
+      payload: { feature: activeFeature },
     });
   }
 
   sendActiveEditor();
-  setTimeout(() => {
-    sendTODOs();
-  }, 0);
+  setTimeout(sendTODOs, 0);
 }
 
 /* ------------------------------ Editor Sync ------------------------------ */
@@ -303,15 +227,6 @@ function sendTheme() {
   });
 }
 
-function sendActiveFeature() {
-  if (!activeFeature) {return;}
-
-  broadcast({
-    type: "switchFeature",
-    payload: { feature: activeFeature },
-  });
-}
-
 /* ------------------------------ Git Diff ------------------------------ */
 
 async function sendFileDiff(doc?: vscode.TextDocument) {
@@ -319,10 +234,7 @@ async function sendFileDiff(doc?: vscode.TextDocument) {
 
   try {
     const diff = await simpleGit().diff(["--", doc.uri.fsPath]);
-    broadcast({
-      type: "fileDiff",
-      payload: { diff },
-    });
+    broadcast({ type: "fileDiff", payload: { diff } });
   } catch {}
 }
 
@@ -354,10 +266,7 @@ async function sendTODOs() {
       });
     }
 
-    broadcast({
-      type: "todosResult",
-      payload: { todos },
-    });
+    broadcast({ type: "todosResult", payload: { todos } });
   } finally {
     todosRunning = false;
   }

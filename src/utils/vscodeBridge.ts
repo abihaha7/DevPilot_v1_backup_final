@@ -2,7 +2,15 @@
 
 export type MessageHandler = (payload: any) => void;
 
+/* -------------------------------------------------------------------------- */
+/*                               Handler Store                                */
+/* -------------------------------------------------------------------------- */
+
 const handlers: Record<string, MessageHandler[]> = {};
+
+/* -------------------------------------------------------------------------- */
+/*                           VS Code API Accessor                              */
+/* -------------------------------------------------------------------------- */
 
 /**
  * Get the already-acquired VS Code API instance.
@@ -25,8 +33,13 @@ function getVSCodeApi():
   return vscode;
 }
 
+/* -------------------------------------------------------------------------- */
+/*                          Outgoing → Extension                               */
+/* -------------------------------------------------------------------------- */
+
 /**
  * Sends a message from the webview to the VS Code extension backend.
+ * ALWAYS sends messages in the shape: { type, payload }
  */
 export function postToExtension(type: string, payload: any = {}) {
   const vscode = getVSCodeApi();
@@ -34,9 +47,13 @@ export function postToExtension(type: string, payload: any = {}) {
 
   vscode.postMessage({
     type,
-    payload, // ALWAYS wrapped
+    payload,
   });
 }
+
+/* -------------------------------------------------------------------------- */
+/*                          Incoming ← Extension                               */
+/* -------------------------------------------------------------------------- */
 
 /**
  * Registers a listener for messages coming from the VS Code extension.
@@ -57,15 +74,39 @@ export function onExtensionMessage(
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/*                      Global Message Dispatcher (SAFE)                       */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Global listener — receives all messages from the extension backend.
- * Expects messages in shape: { type, payload }
+ * Ensure we only attach ONE global message listener,
+ * even if this module is bundled / hot-reloaded multiple times.
  */
-window.addEventListener("message", (event) => {
-  const message = event.data;
-  if (!message?.type) {return;}
+declare global {
+  interface Window {
+    __devpilotBridgeInitialized?: boolean;
+  }
+}
 
-  const { type, payload } = message;
+if (!(window as any).__devpilotBridgeInitialized) {
+  (window as any).__devpilotBridgeInitialized = true;
 
-  handlers[type]?.forEach((fn) => fn(payload));
-});
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+    if (!message?.type) {return;}
+
+    const { type, payload } = message;
+
+    const list = handlers[type];
+    if (!list || list.length === 0) {return;}
+
+    // Fault isolation: one bad handler must NOT break others
+    for (const fn of list) {
+      try {
+        fn(payload);
+      } catch (err) {
+        console.error(`[DevPilot] handler error for "${type}"`, err);
+      }
+    }
+  });
+}

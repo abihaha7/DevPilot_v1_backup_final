@@ -1,9 +1,12 @@
 import * as vscode from "vscode";
+import { attachRightDashboard } from "./extension";
 
 export class RightDashboardProvider {
   private panel: vscode.WebviewPanel | null = null;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  /* ---------------- OPEN / REVEAL PANEL ---------------- */
 
   public show() {
     if (this.panel) {
@@ -24,22 +27,72 @@ export class RightDashboardProvider {
       }
     );
 
-    this.panel.webview.onDidReceiveMessage((msg) => {
-      vscode.commands.executeCommand(
-      "devpilot.__internalMessage",
-        msg,
-      this.panel
-    );
-  });
+    // 🔗 attach immediately (legacy-safe)
+    attachRightDashboard(this.panel.webview);
 
-  //ATTACH IMMEDIATELY WHEN PANEL EXISTS
+    /* ---------------- MESSAGE BRIDGE (DIRECT) ---------------- */
+
+    this.panel.webview.onDidReceiveMessage((msg) => {
+      if (!msg?.type) {return;}
+
+      switch (msg.type) {
+        case "ready": {
+          console.log("[DevPilot] RightDashboard READY");
+
+          const feature =
+            this.context.globalState.get<string>(
+              "devpilot.activeFeature"
+            ) ?? "chat";
+
+          this.panel?.webview.postMessage({
+            type: "switchFeature",
+            payload: { feature },
+          });
+          break;
+        }
+
+        case "chatMessage": {
+          vscode.commands.executeCommand(
+            "devpilot.chatMessage",
+            msg.payload
+          );
+          break;
+        }
+
+        case "setFeature": {
+          const feature = msg.payload?.feature;
+          if (!feature) {return;}
+
+          this.context.globalState.update(
+            "devpilot.activeFeature",
+            feature
+          );
+
+          this.panel?.webview.postMessage({
+            type: "switchFeature",
+            payload: { feature },
+          });
+          break;
+        }
+
+        default:
+          console.warn("[DevPilot] Unknown panel message:", msg);
+      }
+    });
+
+    /* ---------------- CLEANUP ---------------- */
 
     this.panel.onDidDispose(() => {
       this.panel = null;
+      attachRightDashboard(null as any);
     });
+
+    /* ---------------- HTML ---------------- */
 
     this.panel.webview.html = this.getHtml(this.panel.webview);
   }
+
+  /* ---------------- API ---------------- */
 
   public postMessage(message: unknown) {
     this.panel?.webview.postMessage(message);
@@ -48,6 +101,8 @@ export class RightDashboardProvider {
   public get webview(): vscode.Webview | null {
     return this.panel?.webview ?? null;
   }
+
+  /* ---------------- HTML ---------------- */
 
   private getHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
@@ -73,7 +128,6 @@ export class RightDashboardProvider {
       )
     );
 
-    // ✅ SINGLE CSP SOURCE OF TRUTH (NONCE-BASED, PRODUCTION SAFE)
     const csp = [
       "default-src 'none'",
       `img-src ${webview.cspSource} https: data:`,
@@ -83,63 +137,45 @@ export class RightDashboardProvider {
       `connect-src ${webview.cspSource}`,
     ].join("; ");
 
-    return /* html */ `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="${csp}" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="${csp}" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <link href="${baseCss}" rel="stylesheet" />
-    <link href="${globalsCss}" rel="stylesheet" />
+  <link href="${baseCss}" rel="stylesheet" />
+  <link href="${globalsCss}" rel="stylesheet" />
 
-    <title>DevPilot</title>
+  <title>DevPilot</title>
 
-    <!-- ✅ ALL INLINE CSS IS NOW LEGALLY NONCED -->
-    <style nonce="${nonce}">
-      html, body {
-        padding: 0;
-        margin: 0;
-        height: 100%;
-        background: var(--vscode-editor-background);
-        color: var(--vscode-editor-foreground);
-      }
+  <style nonce="${nonce}">
+    html, body, #root {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      background: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
+    }
+  </style>
+</head>
 
-      #root {
-        height: 100%;
-        width: 100%;
-        animation: devpilot-slide-in 160ms cubic-bezier(0.2, 0, 0, 1);
-      }
+<body>
+  <div id="root"></div>
 
-      @keyframes devpilot-slide-in {
-        from {
-          opacity: 0;
-          transform: translateX(8px);
-        }
-        to {
-          opacity: 1;
-          transform: translateX(0);
-        }
-      }
-    </style>
-  </head>
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    vscode.postMessage({ type: "ready" });
+  </script>
 
-  <body>
-    <div id="root"></div>
-
-    <!-- VS Code API bootstrap + ready handshake -->
-    <script nonce="${nonce}">
-      const vscode = acquireVsCodeApi();
-      vscode.postMessage({ type: "ready", source: "rightDashboard" });
-    </script>
-
-    <script nonce="${nonce}" src="${scriptUri}"></script>
-  </body>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
+</body>
 </html>`;
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+/* ---------------- NONCE ---------------- */
 
 function getNonce(): string {
   const chars =
