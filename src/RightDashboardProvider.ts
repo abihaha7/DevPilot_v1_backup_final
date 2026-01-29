@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { attachRightDashboard } from "./extension";
+import { attachRightDashboard } from "./core/extension";
 
 export class RightDashboardProvider {
   private panel: vscode.WebviewPanel | null = null;

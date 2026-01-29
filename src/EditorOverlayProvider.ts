@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { attachOverlay } from "./extension"; // ✅ MUST match extension.ts
+import { attachOverlay } from "./core/extension"; // ✅ MUST match extension.ts
 
 export class EditorOverlayProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "devpilot.editorOverlay";

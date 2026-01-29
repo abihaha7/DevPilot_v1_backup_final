@@ -18,7 +18,7 @@ const nodeBuiltins = [
 // ------------------------------
 // PATHS
 // ------------------------------
-const extEntry = path.resolve("src/extension.ts");
+const extEntry = path.resolve("src/core/extension.ts");
 const extOut = path.resolve("out/extension.js");
 
 const dashEntry = path.resolve("src/components/figma-ui/dashboard/FigmaDashboard.tsx");

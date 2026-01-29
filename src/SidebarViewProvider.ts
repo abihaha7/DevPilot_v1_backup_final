@@ -2,7 +2,7 @@
 // DevPilot Sidebar (LEFT PANEL) — navigation only, feature orchestration via extension
 
 import * as vscode from "vscode";
-import { attachSidebar } from "./extension"; // MUST match extension.ts
+import { attachSidebar } from "./core/extension"; // MUST match extension.ts
 
 export class SidebarViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "devpilot.sidebar";
