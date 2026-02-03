@@ -1,523 +1,526 @@
+/**
+ * DevPilot Extension Entry Point (Refactored)
+ * 
+ * Editor-first, native VS Code APIs
+ * All features integrated without heavy webviews
+ * Marketplace-grade, Codespaces-optimized
+ */
+
 import * as vscode from "vscode";
-import * as path from "path";
-import OpenAI from "openai";
-import simpleGit from "simple-git";
+import { getLogger, initializeLogging } from "./logger";
+import { registerGlobalErrorHandler } from "./errorHandler";
+import { initializeStateManager } from "./stateManager";
+import { initializeWorkspaceContext } from "./workspaceContext";
+import { NullAIProvider, setAIProvider, getAIProvider } from "./aiProvider";
+import { OpenAIProvider } from "./openaiProvider";
 
-import { SidebarViewProvider } from "../SidebarViewProvider";
-import { EditorOverlayProvider } from "../EditorOverlayProvider";
-import { RightDashboardProvider } from "../RightDashboardProvider";
-
-// Phase-1: Native providers
-import { registerHoverProvider } from "../providers/hover";
+// Native providers (editor-integrated)
+import { registerLearningHoverProvider } from "../providers/learningHover";
 import { registerInlineCompletionProvider } from "../providers/inline";
-import { defaultConfig } from "./config";
-import { initializeLLM } from "./llm";
+import { registerTodoTracker } from "../providers/todoTracker";
+import { registerCommitGeneratorCommands } from "../providers/commitGenerator";
+import { registerLearningTreeView } from "../providers/learningTreeView";
+import { registerCodeTranslation } from "../providers/codeTranslation";
+import { registerAchievements } from "../providers/achievements";
+import { registerRefactoringCodeActionProvider } from "../providers/refactoringCodeAction";
 
-// Phase-1: Commit generator (for testing)
-import {
-  analyzeDiff,
-  generateCommitMessage as generateNativeCommit,
-  generateQuickCommitMessage as generateNativeQuickCommit,
-  getCommitSuggestions as getNativeSuggestions,
-} from "../services/commits";
+// Phase 3 providers
+import { registerPhase3Commands } from "../providers/phase3Commands";
+import { registerWelcomeSidebar } from "../providers/welcomeSidebar";
+import { registerTODOWorkflow } from "../providers/todoWorkflow";
+import { registerInlineSuggestionsProvider } from "../providers/inlineSuggestions";
 
-/* -------------------------------- Globals -------------------------------- */
+// Phase 4 providers
+import { registerDashboardPanel } from "../providers/dashboardPanel";
+import { registerTodoCommentParser } from "../providers/todoCommentParser";
+import { registerEditorDecorations } from "../providers/editorDecorations";
+import { registerHoverProviders } from "../providers/hoverProvider";
+import { registerCodeLensProviders } from "../providers/codeLensProvider";
+import { registerSuggestionFilter } from "../providers/suggestionFilter";
+import { registerAchievementSystem } from "../providers/achievementSystem";
 
-let openaiApiKey: string | undefined;
-let todosRunning = false;
+// UI providers
+import { MinimalSidebarProvider } from "../providers/minimalSidebar";
 
-// 🔒 Webview references
+// Services
+import { GoogleAuthService } from "./authService";
+
+const logger = getLogger("DevPilot");
+
+// Global webview references for broadcaster pattern
 let sidebarWebview: vscode.Webview | null = null;
 let overlayWebview: vscode.Webview | null = null;
 let rightDashboardWebview: vscode.Webview | null = null;
 
-// Providers
-let sidebar: SidebarViewProvider;
-let editorOverlay: EditorOverlayProvider;
-let rightDashboard: RightDashboardProvider;
-
-// Single source of truth
-let activeFeature: string | undefined;
-
-/* ========================= PHASE-1: Native Providers ======================== */
-
-let hoverDisposable: vscode.Disposable | undefined;
-let inlineCompletionDisposable: vscode.Disposable | undefined;
-
-/* -------------------------- Webview Attachers ----------------------------- */
-
-export function attachSidebar(view: vscode.WebviewView) {
+export function attachSidebar(view: vscode.WebviewView): void {
   sidebarWebview = view.webview;
 }
 
-export function attachOverlay(view: vscode.WebviewView) {
+export function attachOverlay(view: vscode.WebviewView): void {
   overlayWebview = view.webview;
 }
 
-export function attachRightDashboard(webview: vscode.Webview | null) {
+export function attachRightDashboard(webview: vscode.Webview | null): void {
   rightDashboardWebview = webview;
 }
 
-/* ------------------------------ Broadcasting ------------------------------ */
+/* ============================================================================
+   EXTENSION ACTIVATION
+   ============================================================================ */
 
-function broadcast(msg: any) {
+export async function activate(context: vscode.ExtensionContext) {
+  console.log("✨ DevPilot activating...");
+
+  // Initialize infrastructure
+  initializeLogging(context);
+  registerGlobalErrorHandler();
+  initializeStateManager(context);
+  initializeWorkspaceContext();
+
+  logger.info("DevPilot extension starting");
+
+  /* ========== Initialize Services ==========*/
+
+  // Auth service (manages learning progress)
+  const authService = new GoogleAuthService(context);
+
+  // AI Provider (start with offline mode)
+  setAIProvider(new NullAIProvider());
+
+  // Check for saved OpenAI key
+  const openaiKey = context.globalState.get<string>("devpilot.openaiKey");
+  if (openaiKey) {
+    try {
+      const aiProvider = new OpenAIProvider(openaiKey);
+      if (aiProvider.isReady()) {
+        setAIProvider(aiProvider);
+        logger.info("OpenAI provider initialized");
+      }
+    } catch (error) {
+      logger.warn("Failed to initialize OpenAI", { error: String(error) });
+    }
+  }
+
+  /* ========== Register Native Providers ==========*/
+
+  // Learning hover explanations (inline)
   try {
-    sidebarWebview?.postMessage(msg);
-    overlayWebview?.postMessage(msg);
-    rightDashboardWebview?.postMessage(msg);
-  } catch {}
-}
-
-/* -------------------------------- Utilities -------------------------------- */
-
-function debounce(fn: (...args: any[]) => void, delay = 400) {
-  let timer: NodeJS.Timeout;
-  return (...args: any[]) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delay);
-  };
-}
-
-/* -------------------------------- Debounce -------------------------------- */
-
-function getSmartSuggestion(
-  line: string,
-  language: string
-): string | null {
-  const trimmed = line.trim();
-
-  if (!trimmed) return null;
-
-  // JavaScript / TypeScript
-  if (language === "javascript" || language === "typescript") {
-    if (trimmed.startsWith("function")) {
-      return "\n  // TODO: implement logic\n}";
-    }
-
-    if (trimmed.includes("console.log")) {
-      return "\n// Debug log";
-    }
-
-    if (trimmed.endsWith("{")) {
-      return "\n  \n}";
-    }
-  }
-
-  // HTML
-  if (language === "html") {
-    if (trimmed.startsWith("<div")) {
-      return "\n  \n</div>";
-    }
-  }
-
-  return null;
-}
-
-/* -------------------------------- Activate -------------------------------- */
-
-export function activate(context: vscode.ExtensionContext) {
-  openaiApiKey = context.globalState.get<string>("devpilot.openaiKey");
-  activeFeature = context.globalState.get<string>("devpilot.activeFeature");
-
-  console.log("[DevPilot] Extension activating…");
-  console.log(`[DevPilot] Phase-1 Native: Hover + Inline completions (deterministic, offline)`);
-  console.log(`[DevPilot] Commit Generator: Native semantic analysis (no LLM needed)`);
-
-  /* ============================================================================
-     PHASE-1: NATIVE PROVIDERS (Deterministic, no LLM)
-     ============================================================================ */
-
-  // Register native hover provider
-  if (defaultConfig.enableHoverExplanations) {
-    hoverDisposable = registerHoverProvider(context);
+    const hoverDisposable = registerLearningHoverProvider(context);
     context.subscriptions.push(hoverDisposable);
-    console.log("[DevPilot] ✅ Hover explanations (Native) enabled");
+    logger.info("Learning hover provider registered");
+  } catch (error) {
+    logger.warn("Failed to register hover provider", { error: String(error) });
   }
 
-  // Register native inline completion provider
-  if (defaultConfig.enableInlineCompletions) {
-    inlineCompletionDisposable = registerInlineCompletionProvider(context);
-    context.subscriptions.push(inlineCompletionDisposable);
-    console.log("[DevPilot] ✅ Inline completions (Native) enabled");
+  // Inline completions (context-aware, learning-focused)
+  try {
+    const inlineDisposable = registerInlineCompletionProvider(context);
+    context.subscriptions.push(inlineDisposable);
+    logger.info("Inline completion provider registered");
+  } catch (error) {
+    logger.warn("Failed to register inline provider", { error: String(error) });
   }
 
-  /* ============================================================================
-     PHASE-2: LLM INITIALIZATION (Feature-flagged, for future)
-     ============================================================================ */
-
-  if (openaiApiKey && defaultConfig.useLLMMode) {
-    initializeLLM(openaiApiKey);
-    console.log("[DevPilot] ✅ LLM mode initialized (Phase-2)");
+  // TODO tracker (CodeLens + Diagnostics)
+  try {
+    const todoDisposable = registerTodoTracker(context);
+    context.subscriptions.push(todoDisposable);
+    logger.info("TODO tracker registered");
+  } catch (error) {
+    logger.warn("Failed to register TODO tracker", { error: String(error) });
   }
 
-  /* ============================================================================
-     CORE FEATURES
-     ============================================================================ */
+  /* ========== Register Commands ==========*/
 
-  /* ---------------- Commands (REGISTER FIRST) ---------------- */
+  // Commit message generation (native + AI)
+  try {
+    registerCommitGeneratorCommands(context);
+    logger.info("Commit generator registered");
+  } catch (error) {
+    logger.warn("Failed to register commit generator", { error: String(error) });
+  }
+
+  // Code translation (split-screen)
+  try {
+    registerCodeTranslation(context);
+    logger.info("Code translation registered");
+  } catch (error) {
+    logger.warn("Failed to register code translation", { error: String(error) });
+  }
+
+  // Refactoring code action provider (lightbulb for refactorings)
+  try {
+    registerRefactoringCodeActionProvider(context);
+    logger.info("Refactoring code action provider registered");
+  } catch (error) {
+    logger.warn("Failed to register refactoring code action provider", {
+      error: String(error),
+    });
+  }
+
+  // Learning TreeView
+  try {
+    registerLearningTreeView(context);
+    logger.info("Learning TreeView registered");
+  } catch (error) {
+    logger.warn("Failed to register learning TreeView", { error: String(error) });
+  }
+
+  // Achievements and badges
+  try {
+    registerAchievements(context, authService);
+    logger.info("Achievements system registered");
+  } catch (error) {
+    logger.warn("Failed to register achievements", { error: String(error) });
+  }
+
+  // Phase 3: Command Palette Integration
+  try {
+    registerPhase3Commands(context, {
+      onOpenChatbot: () => {
+        vscode.commands.executeCommand("devpilot.focus");
+      },
+      onOpenQuiz: () => {
+        vscode.commands.executeCommand("devpilot.focus");
+      },
+      onOpenHelp: () => {
+        // Help opens in separate webview
+      },
+    });
+    logger.info("Phase 3 commands registered");
+  } catch (error) {
+    logger.warn("Failed to register Phase 3 commands", { error: String(error) });
+  }
+
+  // Phase 3: Welcome Sidebar
+  try {
+    registerWelcomeSidebar(context);
+    logger.info("Welcome sidebar registered");
+  } catch (error) {
+    logger.warn("Failed to register welcome sidebar", { error: String(error) });
+  }
+
+  // Phase 3: TODO Workflow System
+  try {
+    registerTODOWorkflow(context);
+    logger.info("TODO workflow system registered");
+  } catch (error) {
+    logger.warn("Failed to register TODO workflow", { error: String(error) });
+  }
+
+  // Phase 3: Inline Suggestions with Heuristics
+  try {
+    const suggestionsDisposable = registerInlineSuggestionsProvider(context);
+    context.subscriptions.push(suggestionsDisposable);
+    logger.info("Inline suggestions provider registered");
+  } catch (error) {
+    logger.warn("Failed to register inline suggestions", { error: String(error) });
+  }
+
+  // Phase 4: Unified Dashboard Panel
+  try {
+    registerDashboardPanel(context);
+    logger.info("Dashboard panel registered");
+  } catch (error) {
+    logger.warn("Failed to register dashboard panel", { error: String(error) });
+  }
+
+  // Phase 4: TODO Comment Parser
+  try {
+    registerTodoCommentParser(context);
+    logger.info("TODO comment parser registered");
+  } catch (error) {
+    logger.warn("Failed to register TODO comment parser", { error: String(error) });
+  }
+
+  // Phase 4: Editor Decorations
+  try {
+    registerEditorDecorations(context);
+    logger.info("Editor decorations registered");
+  } catch (error) {
+    logger.warn("Failed to register editor decorations", { error: String(error) });
+  }
+
+  // Phase 4: Hover Providers
+  try {
+    registerHoverProviders(context);
+    logger.info("Hover providers registered");
+  } catch (error) {
+    logger.warn("Failed to register hover providers", { error: String(error) });
+  }
+
+  // Phase 4: CodeLens Providers
+  try {
+    registerCodeLensProviders(context);
+    logger.info("CodeLens providers registered");
+  } catch (error) {
+    logger.warn("Failed to register CodeLens providers", { error: String(error) });
+  }
+
+  // Phase 4: Suggestion Filter
+  try {
+    registerSuggestionFilter(context);
+    logger.info("Suggestion filter registered");
+  } catch (error) {
+    logger.warn("Failed to register suggestion filter", { error: String(error) });
+  }
+
+  // Phase 4: Achievement System
+  try {
+    registerAchievementSystem(context);
+    logger.info("Achievement system registered");
+  } catch (error) {
+    logger.warn("Failed to register achievement system", { error: String(error) });
+  }
+
+  /* ========== Register UI Components ==========*/
+
+  // Minimal sidebar (navigation only)
+  const sidebar = new MinimalSidebarProvider(context);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      MinimalSidebarProvider.viewType,
+      sidebar
+    )
+  );
+  logger.info("Minimal sidebar provider registered");
+
+  /* ========== Core Commands ==========*/
 
   const register = (cmd: string, cb: (...args: any[]) => any) =>
     context.subscriptions.push(vscode.commands.registerCommand(cmd, cb));
 
-  register("devpilot.route", (msg?: any) => {
-    if (!msg?.target || !msg?.type) {
+  // Quick Fix: Remove unused variable
+  register("devpilot.removeUnusedVariable", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage("No active editor");
       return;
     }
-    if (msg.type === "switchFeature") {
-      return;
-    }
 
-    if (msg.target === "sidebar") {
-      sidebarWebview?.postMessage(msg);
-    }
-    if (msg.target === "right") {
-      rightDashboardWebview?.postMessage(msg);
-    }
-    if (msg.target === "overlay") {
-      overlayWebview?.postMessage(msg);
-    }
-  });
-
-  register(
-    "devpilot.__internalMessage",
-    async (message: any, source: vscode.WebviewPanel | vscode.WebviewView) => {
-      if (!message?.type || !source) {
-        return;
-      }
-
-      switch (message.type) {
-        case "ready": {
-          if (activeFeature) {
-            source.webview.postMessage({
-              type: "switchFeature",
-              payload: { feature: activeFeature },
-            });
-          }
-          break;
-        }
-
-        case "switchFeature": {
-          const feature = message.payload?.feature;
-          if (!feature) {
-            return;
-          }
-
-          activeFeature = feature;
-          context.globalState.update("devpilot.activeFeature", feature);
-
-          rightDashboard?.show();
-
-          broadcast({
-            type: "switchFeature",
-            payload: { feature },
-          });
-          break;
-        }
-      }
-    }
-  );
-
-  register("devpilot.chatMessage", async (payload?: { text?: string }) => {
-    const text = payload?.text ?? "";
-    const reply = await handleChat(text);
-
-    rightDashboardWebview?.postMessage({
-      type: "chatReply",
-      payload: { text: reply },
-    });
-  });
-
-  register("devpilot.openCommitGenerator", async () => {
-    // Integrate with existing dashboard instead of creating a new panel
-    activeFeature = "commitGenerator";
-    context.globalState.update("devpilot.activeFeature", "commitGenerator");
-
-    // Show the right dashboard panel
-    rightDashboard?.show();
-
-    // Broadcast to switch to commit generator feature
-    broadcast({
-      type: "switchFeature",
-      payload: { feature: "commitGenerator" },
-    });
-
-    vscode.window.showInformationMessage(
-      "✅ Commit Generator opened in dashboard!"
-    );
-  });
-
-  /* ============================================================================
-     TEST COMMAND: Verify Commit Generator Works
-     ============================================================================ */
-
-  /* ============================================================================
-     TEST COMMAND: Verify Commit Generator Works
-     ============================================================================ */
-
-  register("devpilot.testCommitGenerator", async () => {
     try {
-      console.log("\n" + "=".repeat(80));
-      console.log("🧪 DevPilot Commit Generator Test");
-      console.log("=".repeat(80));
+      const selection = editor.selection;
+      const selectedText = editor.document.getText(selection);
+      const newText = selectedText
+        .replace(/const\s+\w+\s*=\s*/, "")
+        .replace(/let\s+\w+\s*=\s*/, "");
 
-      // Get real git diff from workspace
-      const git = simpleGit();
-      let diff = "";
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(editor.document.uri, selection, newText);
+      await vscode.workspace.applyEdit(edit);
 
-      try {
-        diff = await git.diff();
-        if (!diff) {
-          console.log("\n📝 No uncommitted changes found. Using sample diff for testing...\n");
-          diff = `diff --git a/src/utils/utils.ts b/src/utils/utils.ts
-index 1234567..abcdefg 100644
---- a/src/utils/utils.ts
-+++ b/src/utils/utils.ts
-@@ -45,8 +45,9 @@ export function getWordAtPosition(text: string, position: number) {
-   if (!isValidPosition(position)) {
--    return null;
-+    return { word: "", start: position, end: position };
-   }
-+  // Fix: return proper object structure
-   const word = extractWord(text, position);
-   return word;
- }`;
+      vscode.window.showInformationMessage("✅ Removed unused variable");
+      logger.info("Unused variable removed via quick fix");
+    } catch (error) {
+      logger.error("Failed to remove unused variable", { error: String(error) });
+      vscode.window.showErrorMessage("Failed to remove unused variable");
+    }
+  });
+
+  // Quick Fix: Add type annotation
+  register("devpilot.addTypeAnnotation", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage("No active editor");
+      return;
+    }
+
+    try {
+      const selection = editor.selection;
+      const selectedText = editor.document.getText(selection);
+
+      // Simple heuristic: detect variable type from assignment
+      if (selectedText.includes("=")) {
+        let typeAnnotation = ": any";
+
+        if (selectedText.includes('"') || selectedText.includes("'")) {
+          typeAnnotation = ": string";
+        } else if (selectedText.includes("[")) {
+          typeAnnotation = ": any[]";
+        } else if (selectedText.includes("{")) {
+          typeAnnotation = ": Record<string, any>";
+        } else if (!isNaN(Number(selectedText.split("=")[1]))) {
+          typeAnnotation = ": number";
         }
-      } catch (e) {
-        console.log("⚠️  No git repository found. Using sample diff.\n");
-        diff = `diff --git a/src/core/extension.ts b/src/core/extension.ts
-new file mode 100644
-index 0000000..1234567
---- /dev/null
-+++ b/src/core/extension.ts
-@@ -0,0 +1,50 @@
-+export function activate(context: vscode.ExtensionContext) {
-+  console.log("[DevPilot] Extension activated");
-+  registerHoverProvider(context);
-+  registerInlineCompletionProvider(context);
-+}`;
+
+        const newText = selectedText.replace(/(\w+)(\s*)=/, `$1${typeAnnotation}$2=`);
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(editor.document.uri, selection, newText);
+        await vscode.workspace.applyEdit(edit);
+
+        vscode.window.showInformationMessage(`✅ Added type annotation: ${typeAnnotation}`);
+        logger.info("Type annotation added via quick fix", { type: typeAnnotation });
+      }
+    } catch (error) {
+      logger.error("Failed to add type annotation", { error: String(error) });
+      vscode.window.showErrorMessage("Failed to add type annotation");
+    }
+  });
+
+  // Quick Fix: Fix type mismatch
+  register("devpilot.fixTypeMismatch", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage("No active editor");
+      return;
+    }
+
+    try {
+      const selection = editor.selection;
+      const selectedText = editor.document.getText(selection);
+
+      // Simple fix: add type conversion
+      let fixed = selectedText;
+      if (selectedText.includes("number") && selectedText.includes('"')) {
+        fixed = `parseInt(${selectedText})`;
+      } else if (selectedText.includes("string")) {
+        fixed = `String(${selectedText})`;
+      } else if (selectedText.includes("boolean")) {
+        fixed = `Boolean(${selectedText})`;
       }
 
-      // Analyze the diff
-      console.log("📊 Analyzing diff...\n");
-      const analysis = analyzeDiff(diff);
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(editor.document.uri, selection, fixed);
+      await vscode.workspace.applyEdit(edit);
 
-      console.log("  Files modified:", analysis.filesModified.length);
-      console.log("  Files added:", analysis.filesAdded.length);
-      console.log("  Lines added:", analysis.addedLines);
-      console.log("  Lines deleted:", analysis.deletedLines);
-      console.log("  Keywords detected:", Array.from(analysis.keywords).join(", "));
-
-      // Generate commit messages
-      console.log("\n" + "-".repeat(80));
-      console.log("📝 Generated Commit Messages");
-      console.log("-".repeat(80));
-
-      const fullCommit = generateNativeCommit(diff);
-      const quickCommit = generateNativeQuickCommit(diff);
-      const suggestions = getNativeSuggestions(diff);
-
-      console.log("\n✅ Full Commit Message:");
-      console.log(`   "${fullCommit}"`);
-
-      console.log("\n⚡ Quick Subject Line:");
-      console.log(`   "${quickCommit}"`);
-
-      console.log("\n💡 Suggestions:");
-      suggestions.forEach((msg, i) => {
-        console.log(`   ${i + 1}. "${msg}"`);
-      });
-
-      console.log("\n" + "=".repeat(80));
-      console.log("✨ Test Complete! Commit generator is working.\n");
-      console.log("   Detected type: " + analysis.keywords.values().next().value?.toUpperCase() || "refactor");
-      console.log("   Deterministic: ✅ (same diff = same output)");
-      console.log("   Offline: ✅ (no API calls)");
-      console.log("=".repeat(80) + "\n");
-
-      vscode.window.showInformationMessage(
-        `✅ Commit Generator Test Complete! Check Debug Console for details.`
-      );
+      vscode.window.showInformationMessage("✅ Fixed type mismatch");
+      logger.info("Type mismatch fixed via quick fix");
     } catch (error) {
-      console.error("[DevPilot] Test error:", error);
-      vscode.window.showErrorMessage(
-        `❌ Test failed: ${error instanceof Error ? error.message : String(error)}`
-      );
+      logger.error("Failed to fix type mismatch", { error: String(error) });
+      vscode.window.showErrorMessage("Failed to fix type mismatch");
     }
   });
 
-  /* ---------------- Providers (AFTER commands) ---------------- */
+  // Quick Fix: Add await
+  register("devpilot.addAwait", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage("No active editor");
+      return;
+    }
 
-  sidebar = new SidebarViewProvider(context);
-  editorOverlay = new EditorOverlayProvider(context);
-  rightDashboard = new RightDashboardProvider(context);
+    try {
+      const selection = editor.selection;
+      const selectedText = editor.document.getText(selection);
 
-  /* ---------------- Webview Providers ---------------- */
+      if (!selectedText.trim().startsWith("await ")) {
+        const newText = `await ${selectedText}`;
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(editor.document.uri, selection, newText);
+        await vscode.workspace.applyEdit(edit);
 
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      SidebarViewProvider.viewType,
-      sidebar
-    ),
-    vscode.window.registerWebviewViewProvider(
-      EditorOverlayProvider.viewType,
-      editorOverlay
-    )
-  );
+        vscode.window.showInformationMessage("✅ Added await keyword");
+        logger.info("Await keyword added via quick fix");
+      }
+    } catch (error) {
+      logger.error("Failed to add await", { error: String(error) });
+      vscode.window.showErrorMessage("Failed to add await");
+    }
+  });
 
-  console.log("[DevPilot] Extension activated");
+  // Quick Fix: Add optional chaining
+  register("devpilot.addOptionalChaining", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage("No active editor");
+      return;
+    }
 
-  /* ---------------- Editor Sync ---------------- */
+    try {
+      const selection = editor.selection;
+      const selectedText = editor.document.getText(selection);
 
-  const syncEditorDebounced = debounce(() => {
-    sendActiveEditor();
-    setTimeout(sendTODOs, 0);
-  }, 800);
+      // Replace . with ?. for optional chaining
+      if (selectedText.includes(".") && !selectedText.includes("?.")) {
+        const newText = selectedText.replace(/\.(?!\.)/g, "?.");
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(editor.document.uri, selection, newText);
+        await vscode.workspace.applyEdit(edit);
 
-  context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(sendActiveEditor),
-    vscode.window.onDidChangeTextEditorSelection((e) =>
-      sendCursorSelection(e.textEditor)
-    ),
-    vscode.workspace.onDidChangeTextDocument((e) => {
-      sendFileDiff(e.document);
-      syncEditorDebounced();
-    })
-  );
+        vscode.window.showInformationMessage("✅ Added optional chaining");
+        logger.info("Optional chaining added via quick fix");
+      }
+    } catch (error) {
+      logger.error("Failed to add optional chaining", { error: String(error) });
+      vscode.window.showErrorMessage("Failed to add optional chaining");
+    }
+  });
 
-  /* ---------------- Theme Sync ---------------- */
-
-  context.subscriptions.push(
-    vscode.window.onDidChangeActiveColorTheme(sendTheme)
-  );
-
-  /* ---------------- Restore ---------------- */
-
-  if (activeFeature) {
-    rightDashboard.show();
-    broadcast({
-      type: "switchFeature",
-      payload: { feature: activeFeature },
+  // Set OpenAI API Key
+  register("devpilot.setOpenAIKey", async () => {
+    const key = await vscode.window.showInputBox({
+      prompt: "Enter your OpenAI API key",
+      password: true,
+      title: "DevPilot: Set OpenAI API Key",
     });
-  }
 
-  sendActiveEditor();
-  setTimeout(sendTODOs, 0);
-}
-
-/* ------------------------------ Editor Sync ------------------------------ */
-
-function sendActiveEditor() {
-  const e = vscode.window.activeTextEditor;
-
-  broadcast({
-    type: "activeEditor",
-    payload: e
-      ? {
-          uri: e.document.uri.fsPath,
-          text: e.document.getText(),
-          languageId: e.document.languageId,
-          fileName: path.basename(e.document.fileName),
+    if (key) {
+      await context.globalState.update("devpilot.openaiKey", key);
+      try {
+        const provider = new OpenAIProvider(key);
+        if (provider.isReady()) {
+          setAIProvider(provider);
+          vscode.window.showInformationMessage(
+            "✅ OpenAI API key set successfully!"
+          );
+          logger.info("OpenAI key configured");
         }
-      : null,
-  });
-}
-
-function sendCursorSelection(editor?: vscode.TextEditor) {
-  if (!editor) {return;}
-
-  broadcast({
-    type: "cursorSelection",
-    payload: {
-      selections: editor.selections.map((s) => ({
-        start: s.start,
-        end: s.end,
-        text: editor.document.getText(s),
-      })),
-    },
-  });
-}
-
-function sendTheme() {
-  const theme = vscode.window.activeColorTheme;
-
-  broadcast({
-    type: "theme",
-    payload: { kind: theme.kind },
-  });
-}
-
-/* ------------------------------ Git Diff ------------------------------ */
-
-async function sendFileDiff(doc?: vscode.TextDocument) {
-  if (!doc) {return;}
-
-  try {
-    const diff = await simpleGit().diff(["--", doc.uri.fsPath]);
-    broadcast({ type: "fileDiff", payload: { diff } });
-  } catch {}
-}
-
-/* ------------------------------ TODO ------------------------------ */
-
-async function sendTODOs() {
-  if (todosRunning) {return;}
-  todosRunning = true;
-
-  try {
-    const files = await vscode.workspace.findFiles(
-      "**/*.{ts,tsx,js,jsx}",
-      "**/{node_modules,out,dist}/**",
-      50
-    );
-
-    const todos: Array<{ file: string; line: number; text: string }> = [];
-
-    for (const file of files) {
-      const doc = await vscode.workspace.openTextDocument(file);
-      doc.getText().split("\n").forEach((line, i) => {
-        if (line.includes("TODO")) {
-          todos.push({
-            file: path.basename(file.fsPath),
-            line: i + 1,
-            text: line.trim(),
-          });
-        }
-      });
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          "Invalid API key. Check the key and try again."
+        );
+        logger.error("Invalid OpenAI key", { error: String(error) });
+      }
     }
+  });
 
-    broadcast({ type: "todosResult", payload: { todos } });
-  } finally {
-    todosRunning = false;
+  // Google Sign In
+  register("devpilot.signInGoogle", async () => {
+    const profile = await authService.signInWithGoogle();
+    if (profile) {
+      vscode.window.showInformationMessage(
+        `✨ Signed in as ${profile.displayName || profile.email}`
+      );
+      logger.info("User signed in", { email: profile.email });
+    }
+  });
+
+  // Sign Out
+  register("devpilot.signOut", async () => {
+    await authService.signOut();
+  });
+
+  // Track learning activity
+  register("devpilot.trackLearningActivity", async (duration: number) => {
+    await authService.trackActivity("learning", duration);
+    logger.info("Learning activity tracked", { duration });
+  });
+
+  /* ========== Status Bar ==========*/
+
+  try {
+    const statusBar = vscode.window.createStatusBarItem(
+      "devpilot.status",
+      vscode.StatusBarAlignment.Left,
+      100
+    );
+    statusBar.text = "$(rocket) DevPilot";
+    statusBar.tooltip = "DevPilot: Editor-first AI learning assistant";
+    statusBar.command = "devpilot.showTodos";
+    statusBar.show();
+    context.subscriptions.push(statusBar);
+    logger.info("Status bar item created");
+  } catch (error) {
+    logger.warn("Failed to create status bar", { error: String(error) });
   }
+
+  logger.info("DevPilot activation complete");
+  console.log("✨ DevPilot ready!");
+  vscode.window.showInformationMessage(
+    "✨ DevPilot active! Use Command Palette (Ctrl+Shift+P) to access features."
+  );
 }
 
-/* ------------------------------ OpenAI ------------------------------ */
-
-async function generateCommitMessage() {
-  if (!openaiApiKey) {return "API key not set.";}
-
-  const diff = await simpleGit().diff();
-  const client = new OpenAI({ apiKey: openaiApiKey });
-
-  const r = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [{ role: "user", content: diff }],
-  });
-
-  return r.choices[0]?.message?.content ?? "";
+export function deactivate() {
+  logger.info("DevPilot deactivating");
 }
-
-async function handleChat(text: string) {
-  if (!openaiApiKey) {return "API key not set.";}
-
-  const client = new OpenAI({ apiKey: openaiApiKey });
-
-  const r = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [{ role: "user", content: text }],
-  });
-
-  return r.choices[0]?.message?.content ?? "";
-}
-
-export function deactivate() {}

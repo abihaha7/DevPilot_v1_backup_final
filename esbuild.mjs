@@ -110,6 +110,13 @@ async function buildExtension() {
 // ------------------------------
 async function buildDashboard() {
   cleanOldCSS();
+  
+  // Delete any TypeScript-compiled dashboard files so esbuild can rebundle them
+  const dashboardOutDir = path.resolve("out/components/figma-ui");
+  if (fs.existsSync(dashboardOutDir)) {
+    fs.rmSync(dashboardOutDir, { recursive: true });
+  }
+  
   await buildCSS();
 
   const bundles = [
@@ -120,18 +127,21 @@ async function buildDashboard() {
 
   for (const b of bundles) {
     if (!fs.existsSync(b.entry)) {continue;}
-    fs.mkdirSync(path.dirname(b.out), { recursive: true });
+    const outDir = path.dirname(b.out);
+    const name = path.basename(b.out, ".js");
+    fs.mkdirSync(outDir, { recursive: true });
+
+    // Build dashboard as IIFE (no globalName to avoid double-wrapping)
+    // We'll wrap it ourselves with require shim below
     const buildResult = await esbuild.build({
       entryPoints: [b.entry],
       outfile: b.out,
       bundle: true,
       platform: "browser",
-      // For webviews, produce a single IIFE bundle so the webview can load a self-contained script
       format: "iife",
-      globalName: b.name,
+      splitting: false,
       target: ["es2020"],
       jsx: "automatic",
-      // Use automatic runtime and let esbuild inline react/jsx-runtime
       jsxImportSource: "react",
       metafile: true,
       sourcemap: !production,
@@ -143,10 +153,59 @@ async function buildDashboard() {
         ".jsx": "jsx",
         ".css": "text",
       },
+      // Keep node builtins external
       external: [...nodeBuiltins],
       plugins: [logPlugin],
     });
-    console.log(`[build] Built ${b.name} ->`, b.out);
+
+    console.log(`[build] Built ${b.name} ->`, path.join(outDir, `${name}.js`));
+
+    // Inject synthetic require shim WRAPPED around the bundle
+    let bundleContent = fs.readFileSync(b.out, "utf8");
+    
+    // Find where actual code ends and license comments begin
+    // esbuild format is: (() => { code })() then /*! License comments
+    let actualCode = bundleContent;
+    let licenseBlock = "";
+    
+    // Try to find the license marker
+    const licenseIndex = bundleContent.indexOf("/*! Bundled license");
+    if (licenseIndex > 0) {
+      // Include the })(); that comes before the license
+      actualCode = bundleContent.substring(0, licenseIndex).trimEnd();
+      licenseBlock = bundleContent.substring(licenseIndex);
+    }
+    
+    // Remove trailing })(); from actual code since we'll add our own
+    actualCode = actualCode.replace(/\}\)\(\);\s*$/, "").trimEnd();
+    
+    // Make sure we have valid code before wrapping
+    if (!actualCode.includes("(() =>") && !actualCode.includes("(function")) {
+      console.error(`[ERROR] Bundle for ${b.out} appears invalid - no IIFE found`);
+      continue;
+    }
+    
+    const wrappedContent = `(function() {
+  const modules = {};
+  const require = function(id) {
+    if (modules[id]) return modules[id].exports;
+    const module = { exports: {} };
+    modules[id] = module;
+    return module.exports;
+  };
+  const module = { exports: {} };
+  const exports = module.exports;
+  
+  // esbuild IIFE bundle wrapped for webview compatibility
+  ${actualCode}
+})(); // closing esbuild's inner IIFE
+})(); // closing outer wrapper function
+
+${licenseBlock}`;
+    
+    fs.writeFileSync(b.out, wrappedContent, "utf8");
+    console.log(`[inject] Wrapped IIFE with require shim for ${b.out}`);
+
     // Write metafile summary to help debugging bundling and external dependencies
     if (!production && buildResult.metafile) {
       try {
@@ -155,10 +214,7 @@ async function buildDashboard() {
       } catch (e) {}
     }
   }
-}
-
-// ------------------------------
-// FULL BUILD
+  }
 // ------------------------------
 async function buildAll() {
   await buildExtension();

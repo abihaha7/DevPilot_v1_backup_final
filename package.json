@@ -2,36 +2,46 @@
   "name": "devpilot",
   "displayName": "DevPilot",
   "description": "An AI-Powered VS Code Extension for Beginners",
-  "version": "0.0.1",
-  "publisher": "hooriaamir",
+  "version": "0.1.0",
   "main": "./out/extension.js",
-  "type": "commonjs",
-  "engines": {
-    "vscode": "^1.104.0"
+  "publisher": "devpilot",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devpilot/devpilot"
   },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "keywords": [
+    "code-analysis",
+    "refactoring",
+    "diagnostics",
+    "learning",
+    "productivity"
+  ],
   "categories": [
+    "Linters",
     "Other"
   ],
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "activationEvents": [
-    "onView:devpilot.sidebar",
-    "onView:devpilot.editorOverlay",
-    "onCommand:devpilot.openPanel",
-    "onCommand:devpilot.setOpenAIKey",
-    "onCommand:devpilot.openCommitGenerator",
-    "onCommand:devpilot.openChatbot",
-    "onCommand:devpilot.openTodoTracker",
-    "onCommand:devpilot.quizHtmlEasy",
-    "onCommand:devpilot.quizHtmlMedium",
-    "onCommand:devpilot.quizCssEasy",
-    "onCommand:devpilot.quizCssHard",
-    "onCommand:devpilot.quizJsEasy",
-    "onCommand:devpilot.quizJsMedium",
     "onLanguage:javascript",
     "onLanguage:typescript",
+    "onLanguage:python",
+    "onLanguage:go",
     "onLanguage:html",
-    "onStartupFinished"
+    "onLanguage:css"
   ],
   "contributes": {
+    "viewsWelcome": [
+  {
+    "view": "devpilot.welcomeSidebar",
+    "contents": "Welcome to DevPilot! Open a file to get started."
+  }
+],
     "viewsContainers": {
       "activitybar": [
         {
@@ -44,61 +54,119 @@
     "views": {
       "devpilot": [
         {
-          "type": "webview",
-          "id": "devpilot.sidebar",
+          "id": "devpilot.dashboard",
           "name": "Dashboard"
         },
         {
-          "type": "webview",
-          "id": "devpilot.editorOverlay",
-          "name": "Editor Overlay"
+          "id": "devpilot.welcomeSidebar",
+          "name": "Welcome"
+        },
+        {
+          "id": "devpilot.learning",
+          "name": "Learning Resources"
         }
       ]
     },
     "commands": [
       {
-        "command": "devpilot.openPanel",
-        "title": "DevPilot: Open Right Panel"
+        "command": "devpilot.generateCommitMessage",
+        "title": "DevPilot: Generate Commit Message",
+        "category": "DevPilot"
       },
       {
-        "command": "devpilot.setOpenAIKey",
-        "title": "DevPilot: Set OpenAI API Key"
+        "command": "devpilot.showCommitSuggestions",
+        "title": "DevPilot: Show Commit Suggestions",
+        "category": "DevPilot"
       },
       {
-        "command": "devpilot.openCommitGenerator",
-        "title": "DevPilot: Open Commit Generator"
+        "command": "devpilot.analyzeStagedChanges",
+        "title": "DevPilot: Analyze Staged Changes",
+        "category": "DevPilot"
+      },
+      {
+        "command": "devpilot.showTodos",
+        "title": "DevPilot: Show All TODOs",
+        "category": "DevPilot"
+      },
+      {
+        "command": "devpilot.markTodoDone",
+        "title": "DevPilot: Mark TODO Done",
+        "category": "DevPilot"
+      },
+      {
+        "command": "devpilot.increaseTodoPriority",
+        "title": "DevPilot: Increase TODO Priority",
+        "category": "DevPilot"
+      },
+      {
+        "command": "devpilot.deleteTodo",
+        "title": "DevPilot: Delete TODO",
+        "category": "DevPilot"
+      },
+      {
+        "command": "devpilot.showAchievements",
+        "title": "DevPilot: Show Achievements",
+        "category": "DevPilot"
+      },
+      {
+        "command": "devpilot.signInGoogle",
+        "title": "DevPilot: Sign In with Google",
+        "category": "DevPilot"
+      },
+      {
+        "command": "devpilot.signOut",
+        "title": "DevPilot: Sign Out",
+        "category": "DevPilot"
+      },
+      {
+        "command": "devpilot.translateCode",
+        "title": "DevPilot: Translate Code to Another Language",
+        "category": "DevPilot"
+      },
+      {
+        "command": "devpilot.compareCode",
+        "title": "DevPilot: Compare Code",
+        "category": "DevPilot"
       },
       {
         "command": "devpilot.openChatbot",
-        "title": "DevPilot: Open Learning Chatbot"
+        "title": "DevPilot: Open AI Chatbot",
+        "category": "DevPilot"
       },
       {
-        "command": "devpilot.openTodoTracker",
-        "title": "DevPilot: Open Todo Tracker"
+        "command": "devpilot.openQuiz",
+        "title": "DevPilot: Take a Quiz",
+        "category": "DevPilot"
       },
       {
-        "command": "devpilot.quizHtmlEasy",
-        "title": "DevPilot: HTML Quiz (Easy)"
+        "command": "devpilot.openHelp",
+        "title": "DevPilot: Show Help",
+        "category": "DevPilot"
       },
       {
-        "command": "devpilot.quizHtmlMedium",
-        "title": "DevPilot: HTML Quiz (Medium)"
+        "command": "devpilot.checkLearningStreak",
+        "title": "DevPilot: Check Learning Streak",
+        "category": "DevPilot"
       },
       {
-        "command": "devpilot.quizCssHard",
-        "title": "DevPilot: CSS Quiz (Hard)"
+        "command": "devpilot.markTodoComplete",
+        "title": "DevPilot: Mark TODO Complete",
+        "category": "DevPilot"
       },
       {
-        "command": "devpilot.quizCssEasy",
-        "title": "DevPilot: CSS Quiz (Easy)"
+        "command": "devpilot.showFileTodoStats",
+        "title": "DevPilot: Show File TODO Stats",
+        "category": "DevPilot"
       },
       {
-        "command": "devpilot.quizJsMedium",
-        "title": "DevPilot: JavaScript Quiz (Medium)"
+        "command": "devpilot.showTodoAction",
+        "title": "DevPilot: Show TODO Action Menu",
+        "category": "DevPilot"
       },
       {
-        "command": "devpilot.quizJsEasy",
-        "title": "DevPilot: JavaScript Quiz (Easy)"
+        "command": "devpilot.configureSuggestions",
+        "title": "DevPilot: Configure Suggestions",
+        "category": "DevPilot"
       }
     ],
     "languages": [
@@ -157,7 +225,7 @@
       "editor/title": [
         {
           "command": "devpilot.openCommitGenerator",
-          "when": "editorTextFocus",
+          "when": "editorTextFocus && !editorReadonly",
           "group": "navigation"
         }
       ]
@@ -196,8 +264,12 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
-    "compile": "npm run check-types && npm run lint && node esbuild.mjs",
-    "watch": "npm-run-all -p watch:*",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "check": "tsc --noEmit",
+    "lint": "eslint src",
+    "compile": "tsc",
+    "watch": "tsc -w",
     "watch:esbuild": "node esbuild.mjs --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run check-types && npm run lint && node esbuild.mjs --production",
@@ -205,14 +277,14 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",
-    "lint": "eslint src",
-    "test": "vscode-test",
     "build": "npm run compile:ext && npm run build-dashboard",
     "compile:ext": "tsc -p . --outDir out",
     "build-dashboard": "node esbuild.mjs"
   },
   "devDependencies": {
+    "@jest/globals": "^30.2.0",
     "@tailwindcss/postcss": "^4.1.17",
+    "@types/jest": "^30.0.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.18.6",
     "@types/react": "^19.2.2",
@@ -225,13 +297,18 @@
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.9",
     "eslint": "^9.34.0",
+    "jest": "^30.2.0",
     "npm-run-all": "^4.1.5",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.14",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@babel/parser": "^7.28.6",
+    "@babel/traverse": "^7.28.6",
+    "@babel/types": "^7.28.6",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-aspect-ratio": "^1.1.8",

@@ -30,22 +30,14 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
     // Sidebar does NOT own state
     // It routes intent → extension
     view.webview.onDidReceiveMessage((msg) => {
-      if (!msg?.type) {return;}
-
-    view.webview.onDidReceiveMessage((msg) => {
-      if (!msg?.type) {return;}
+      if (!msg?.type) {
+        return;
+      }
 
       // 🚫 DO NOT forward state sync messages
       if (msg.type === "switchFeature" || msg.type === "theme") {
         return;
       }
-
-      vscode.commands.executeCommand("devpilot.route", {
-        target: "right",
-        type: msg.type,
-        payload: msg.payload,
-      });
-    });
 
       // 🔒 Everything else goes through internal message bus
       vscode.commands.executeCommand(
@@ -89,6 +81,10 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+
+  <!-- Webview loads ESM bundle via module script -->
+
+  <script nonce="${nonce}">globalThis.exports = globalThis.exports || {}; globalThis.module = globalThis.module || { exports: globalThis.exports };</script>
   <meta http-equiv="Content-Security-Policy"
     content="
       default-src 'none';
@@ -101,15 +97,36 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <link rel="stylesheet" href="${globalsCss}" />
+  <title>DevPilot — Sidebar</title>
 </head>
-<body class="devpilot-root">
+<body class="devpilot-root" data-brand="DevPilot">
   <div id="root"></div>
 
   <script nonce="${nonce}">
-    (function () {
-      const vscode = acquireVsCodeApi();
-      window.vscode = vscode;
-      vscode.postMessage({ type: 'ready' });
+    // Acquire VS Code API ONCE and store globally
+    if (!window.__vscodeApi) {
+      window.__vscodeApi = acquireVsCodeApi();
+    }
+    window.vscode = window.__vscodeApi;
+    const vscode = window.vscode;
+    vscode.postMessage({ type: 'ready' });
+    
+    // Debug listeners use the same vscode instance
+    window.addEventListener('error', (ev) => {
+      try { vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'error', message: ev.message, filename: ev.filename, lineno: ev.lineno } }); } catch (e) {}
+    });
+
+    window.addEventListener('unhandledrejection', (ev) => {
+      try { vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'unhandledRejection', reason: String(ev.reason) } }); } catch (e) {}
+    });
+
+    (async () => {
+      try {
+        const r = await fetch("${scriptUri}", { method: 'GET' });
+        vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'fetch', ok: r.ok, status: r.status, url: r.url } });
+      } catch (e) {
+        try { vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'fetchError', error: String(e) } }); } catch (e) {}
+      }
     })();
   </script>
 

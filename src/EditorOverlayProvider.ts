@@ -30,21 +30,10 @@ export class EditorOverlayProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-            // 🔁 Explicit relay to RIGHT dashboard when requested
-      view.webview.onDidReceiveMessage((msg) => {
-        if (!msg?.type) {return;}
-
-        // 🚫 DO NOT forward state sync messages
-        if (msg.type === "switchFeature" || msg.type === "theme") {
-          return;
-        }
-
-        vscode.commands.executeCommand("devpilot.route", {
-          target: "right",
-          type: msg.type,
-          payload: msg.payload,
-        });
-      });
+      // 🚫 DO NOT forward state sync messages
+      if (msg.type === "switchFeature" || msg.type === "theme") {
+        return;
+      }
 
       // 🔒 Default: forward EVERYTHING to extension core
       vscode.commands.executeCommand(
@@ -111,6 +100,10 @@ public postMessage(message: unknown) {
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+
+  <!-- Webview loads ESM bundle via module script -->
+
+  <script nonce="${nonce}">globalThis.exports = globalThis.exports || {}; globalThis.module = globalThis.module || { exports: globalThis.exports };</script>
   <meta http-equiv="Content-Security-Policy"
     content="
       default-src 'none';
@@ -137,23 +130,39 @@ public postMessage(message: unknown) {
   <title>DevPilot — Editor Overlay</title>
 </head>
 
-<body class="devpilot-root">
+<body class="devpilot-root" data-brand="DevPilot">
   <div id="root"></div>
 
   <script nonce="${nonce}">
     (function () {
-      if (!window.vscode) {
-        window.vscode = acquireVsCodeApi();
+      if (!window.__vscodeApi) {
+        window.__vscodeApi = acquireVsCodeApi();
       }
+      window.vscode = window.__vscodeApi;
+      const vscode = window.vscode;
 
-      window.acquireVsCodeApi = () => window.vscode;
-
-      window.vscode.postMessage({
+      vscode.postMessage({
         type: "ready"
       });
+
+      window.addEventListener('error', (ev) => {
+        try { vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'error', message: ev.message, filename: ev.filename, lineno: ev.lineno } }); } catch (e) {}
+      });
+
+      window.addEventListener('unhandledrejection', (ev) => {
+        try { vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'unhandledRejection', reason: String(ev.reason) } }); } catch (e) {}
+      });
+
+      (async () => {
+        try {
+          const r = await fetch("${jsUri}", { method: 'GET' });
+          vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'fetch', ok: r.ok, status: r.status, url: r.url } });
+        } catch (e) {
+          try { vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'fetchError', error: String(e) } }); } catch (e) {}
+        }
+      })();
     })();
   </script>
-
   <script nonce="${nonce}" src="${jsUri}"></script>
 </body>
 </html>`;

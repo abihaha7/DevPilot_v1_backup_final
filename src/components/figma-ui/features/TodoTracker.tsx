@@ -7,6 +7,33 @@ import { Circle, AlertTriangle, Clock, X, Minimize2 } from "lucide-react";
 import { postToExtension } from "../../../utils/vscodeBridge";
 import { messageBus } from "../../figma-ui/dashboard/messageBus";
 
+/* Priority icon helper */
+const getPriorityIcon = (priority?: string) => {
+  switch (priority?.toLowerCase()) {
+    case "high":
+      return "🔴";
+    case "medium":
+      return "🟡";
+    case "low":
+      return "🟢";
+    default:
+      return "⚪";
+  }
+};
+
+const getPriorityColor = (priority?: string) => {
+  switch (priority?.toLowerCase()) {
+    case "high":
+      return "var(--vscode-terminal-ansiRed)";
+    case "medium":
+      return "var(--vscode-terminal-ansiYellow)";
+    case "low":
+      return "var(--vscode-terminal-ansiGreen)";
+    default:
+      return "var(--vscode-descriptionForeground)";
+  }
+};
+
 export interface TodoTrackerProps {
   onClose: () => void;
   onScan?: () => void;
@@ -148,7 +175,9 @@ export function TodoTracker({ onClose, onScan, todos = [], themeKind }: TodoTrac
           localTodos.map((todo, i) => (
             <div key={i} style={todoItemStyle}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 4 }}>
-                <Circle className="w-3 h-3" />
+                <span style={{ fontSize: 14, lineHeight: 1 }}>
+                  {getPriorityIcon(todo.priority)}
+                </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
@@ -179,8 +208,8 @@ export function TodoTracker({ onClose, onScan, todos = [], themeKind }: TodoTrac
                       variant="outline"
                       style={{
                         fontSize: 10,
-                        borderColor: "var(--vscode-terminal-ansiYellow)",
-                        color: "var(--vscode-terminal-ansiYellow)",
+                        borderColor: getPriorityColor(todo.priority),
+                        color: getPriorityColor(todo.priority),
                       }}
                     >
                       {todo.priority || "low"}

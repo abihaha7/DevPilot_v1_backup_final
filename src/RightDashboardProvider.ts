@@ -16,7 +16,7 @@ export class RightDashboardProvider {
 
     this.panel = vscode.window.createWebviewPanel(
       "devpilot.rightDashboard",
-      "DevPilot",
+      "DevPilot — Dashboard",
       vscode.ViewColumn.Beside,
       {
         enableScripts: true,
@@ -141,6 +141,10 @@ export class RightDashboardProvider {
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+
+  <!-- Webview loads ESM bundle via module script -->
+
+  <script nonce="${nonce}">globalThis.exports = globalThis.exports || {}; globalThis.module = globalThis.module || { exports: globalThis.exports };</script>
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
@@ -161,12 +165,39 @@ export class RightDashboardProvider {
   </style>
 </head>
 
-<body>
+<body data-brand="DevPilot">
   <div id="root"></div>
 
   <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
+    // Acquire VS Code API once and store globally so bundle can access it
+    // This prevents "An instance of the VS Code API has already been acquired" error
+    if (!window.__vscodeApi) {
+      window.__vscodeApi = acquireVsCodeApi();
+    }
+    window.vscode = window.__vscodeApi;
+    const vscode = window.vscode;
+    
+    // Send ready message
     vscode.postMessage({ type: "ready" });
+
+    // DevPilot: Webview debug helper — reports module load status and uncaught errors
+    window.addEventListener('error', (ev) => {
+      try { vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'error', message: ev.message, filename: ev.filename, lineno: ev.lineno } }); } catch (e) {}
+    });
+
+    window.addEventListener('unhandledrejection', (ev) => {
+      try { vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'unhandledRejection', reason: String(ev.reason) } }); } catch (e) {}
+    });
+
+    // Try fetching the module to detect 404s or CSP failures
+    (async () => {
+      try {
+        const r = await fetch("${scriptUri}", { method: 'GET' });
+        vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'fetch', ok: r.ok, status: r.status, url: r.url } });
+      } catch (e) {
+        try { vscode.postMessage({ type: 'webviewDebug', payload: { kind: 'fetchError', error: String(e) } }); } catch (e) {}
+      }
+    })();
   </script>
 
   <script nonce="${nonce}" src="${scriptUri}"></script>

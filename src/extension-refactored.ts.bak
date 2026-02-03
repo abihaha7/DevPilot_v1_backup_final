@@ -1,0 +1,228 @@
+/**
+ * DevPilot Extension Entry Point (Refactored)
+ * 
+ * Editor-first, native VS Code APIs
+ * All features integrated without heavy webviews
+ * Marketplace-grade, Codespaces-optimized
+ */
+
+import * as vscode from "vscode";
+import { getLogger, initializeLogging } from "./logger";
+import { registerGlobalErrorHandler } from "./errorHandler";
+import { initializeStateManager } from "./stateManager";
+import { initializeWorkspaceContext } from "./workspaceContext";
+
+// Native providers (editor-integrated)
+import { registerLearningHoverProvider } from "../providers/learningHover";
+import { registerInlineCompletionProvider } from "../providers/inline";
+import { registerTodoTracker } from "../providers/todoTracker";
+import { registerCommitGeneratorCommands } from "../providers/commitGenerator";
+import { registerLearningTreeView } from "../providers/learningTreeView";
+import { registerCodeTranslation } from "../providers/codeTranslation";
+
+// UI providers
+import { MinimalSidebarProvider } from "../providers/minimalSidebar";
+
+// Services
+import { GoogleAuthService } from "./authService";
+import { OpenAIProvider } from "./openaiProvider";
+import { NullAIProvider, setAIProvider, getAIProvider } from "./aiProvider";
+import { registerAchievements } from "../providers/achievements";
+
+const logger = getLogger("DevPilot");
+
+/* ============================================================================
+   EXTENSION ACTIVATION
+   ============================================================================ */
+
+export async function activate(context: vscode.ExtensionContext) {
+  console.log("✨ DevPilot activating...");
+
+  // Initialize infrastructure
+  initializeLogging(context);
+  registerGlobalErrorHandler();
+  initializeStateManager(context);
+  initializeWorkspaceContext();
+
+  logger.info("DevPilot extension starting");
+
+  /* ========== Initialize Services ==========*/
+
+  // Auth service (manages learning progress)
+  const authService = new GoogleAuthService(context);
+
+  // AI Provider (start with offline mode)
+  setAIProvider(new NullAIProvider());
+
+  // Check for saved OpenAI key
+  const openaiKey = context.globalState.get<string>("devpilot.openaiKey");
+  if (openaiKey) {
+    try {
+      const aiProvider = new OpenAIProvider(openaiKey);
+      if (aiProvider.isReady()) {
+        setAIProvider(aiProvider);
+        logger.info("OpenAI provider initialized");
+      }
+    } catch (error) {
+      logger.warn("Failed to initialize OpenAI", { error: String(error) });
+    }
+  }
+
+  /* ========== Register Native Providers ==========*/
+
+  // Learning hover explanations (inline)
+  try {
+    const hoverDisposable = registerLearningHoverProvider(context);
+    context.subscriptions.push(hoverDisposable);
+    logger.info("Learning hover provider registered");
+  } catch (error) {
+    logger.warn("Failed to register hover provider", { error: String(error) });
+  }
+
+  // Inline completions (context-aware, learning-focused)
+  try {
+    const inlineDisposable = registerInlineCompletionProvider(context);
+    context.subscriptions.push(inlineDisposable);
+    logger.info("Inline completion provider registered");
+  } catch (error) {
+    logger.warn("Failed to register inline provider", { error: String(error) });
+  }
+
+  // TODO tracker (CodeLens + Diagnostics)
+  try {
+    const todoDisposable = registerTodoTracker(context);
+    context.subscriptions.push(todoDisposable);
+    logger.info("TODO tracker registered");
+  } catch (error) {
+    logger.warn("Failed to register TODO tracker", { error: String(error) });
+  }
+
+  /* ========== Register Commands ==========*/
+
+  // Commit message generation (native + AI)
+  try {
+    registerCommitGeneratorCommands(context);
+    logger.info("Commit generator registered");
+  } catch (error) {
+    logger.warn("Failed to register commit generator", { error: String(error) });
+  }
+
+  // Code translation (split-screen)
+  try {
+    registerCodeTranslation(context);
+    logger.info("Code translation registered");
+  } catch (error) {
+    logger.warn("Failed to register code translation", { error: String(error) });
+  }
+
+  // Learning TreeView
+  try {
+    registerLearningTreeView(context);
+    logger.info("Learning TreeView registered");
+  } catch (error) {
+    logger.warn("Failed to register learning TreeView", { error: String(error) });
+  }
+
+  // Achievements and badges
+  try {
+    registerAchievements(context, authService);
+    logger.info("Achievements system registered");
+  } catch (error) {
+    logger.warn("Failed to register achievements", { error: String(error) });
+  }
+
+  /* ========== Register UI Components ==========*/
+
+  // Minimal sidebar (navigation only)
+  const sidebar = new MinimalSidebarProvider(context);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      MinimalSidebarProvider.viewType,
+      sidebar
+    )
+  );
+  logger.info("Minimal sidebar provider registered");
+
+  /* ========== Core Commands ==========*/
+
+  const register = (cmd: string, cb: (...args: any[]) => any) =>
+    context.subscriptions.push(vscode.commands.registerCommand(cmd, cb));
+
+  // Set OpenAI API Key
+  register("devpilot.setOpenAIKey", async () => {
+    const key = await vscode.window.showInputBox({
+      prompt: "Enter your OpenAI API key",
+      password: true,
+      title: "DevPilot: Set OpenAI API Key",
+    });
+
+    if (key) {
+      await context.globalState.update("devpilot.openaiKey", key);
+      try {
+        const provider = new OpenAIProvider(key);
+        if (provider.isReady()) {
+          setAIProvider(provider);
+          vscode.window.showInformationMessage(
+            "✅ OpenAI API key set successfully!"
+          );
+          logger.info("OpenAI key configured");
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          "Invalid API key. Check the key and try again."
+        );
+        logger.error("Invalid OpenAI key", { error: String(error) });
+      }
+    }
+  });
+
+  // Google Sign In
+  register("devpilot.signInGoogle", async () => {
+    const profile = await authService.signInWithGoogle();
+    if (profile) {
+      vscode.window.showInformationMessage(
+        `✨ Signed in as ${profile.displayName || profile.email}`
+      );
+      logger.info("User signed in", { email: profile.email });
+    }
+  });
+
+  // Sign Out
+  register("devpilot.signOut", async () => {
+    await authService.signOut();
+  });
+
+  // Track learning activity
+  register("devpilot.trackLearningActivity", async (duration: number) => {
+    await authService.trackActivity("learning", duration);
+    logger.info("Learning activity tracked", { duration });
+  });
+
+  /* ========== Status Bar ==========*/
+
+  try {
+    const statusBar = vscode.window.createStatusBarItem(
+      "devpilot.status",
+      vscode.StatusBarAlignment.Left,
+      100
+    );
+    statusBar.text = "$(rocket) DevPilot";
+    statusBar.tooltip = "DevPilot: Editor-first AI learning assistant";
+    statusBar.command = "devpilot.showTodos";
+    statusBar.show();
+    context.subscriptions.push(statusBar);
+    logger.info("Status bar item created");
+  } catch (error) {
+    logger.warn("Failed to create status bar", { error: String(error) });
+  }
+
+  logger.info("DevPilot activation complete");
+  console.log("✨ DevPilot ready!");
+  vscode.window.showInformationMessage(
+    "✨ DevPilot active! Use Command Palette (Ctrl+Shift+P) to access features."
+  );
+}
+
+export function deactivate() {
+  logger.info("DevPilot deactivating");
+}

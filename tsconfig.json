@@ -18,11 +18,13 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "src/**/*.d.ts"     // ✅ added so TypeScript loads your custom type declarations
+    "src/**/*.d.ts"
   ],
   "exclude": [
     "src/test.ts",
-    "src/test/**"
+    "src/test/**",
+    "src/components/figma-ui/**",
+    "src/extension-refactored.ts"
   ]
 }
 

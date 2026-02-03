@@ -7,6 +7,7 @@
 import * as vscode from "vscode";
 import { getHeuristic, searchHeuristics } from "../knowledge/heuristics";
 import { getWordAtPosition, isInString, isInComment } from "../utils/utils";
+import { getErrorDetector } from "../core/errorDetection";
 
 export class HoverProvider implements vscode.HoverProvider {
   async provideHover(
